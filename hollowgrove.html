@@ -1,0 +1,1933 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hollowgrove — A Gardening Game</title>
+<style>
+  :root{
+    --gold:#d9b25a; --gold-soft:#f0d99b; --ink:#0d130f;
+    --panel:rgba(16,26,19,0.82); --panel-edge:rgba(217,178,90,0.35);
+    --text:#e8e2cf; --font:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;height:100%;overflow:hidden;background:var(--ink);font-family:var(--font);color:var(--text);}
+  canvas{display:block;image-rendering:pixelated;}
+  #veil{position:fixed;inset:0;background:radial-gradient(circle at 50% 40%,#16241a,#070b08);
+    display:flex;align-items:center;justify-content:center;flex-direction:column;gap:14px;z-index:50;transition:opacity .8s;}
+  #veil h1{font-size:34px;letter-spacing:3px;color:var(--gold-soft);margin:0;font-weight:500;}
+  #veil p{color:var(--gold);opacity:.7;letter-spacing:2px;font-size:13px;margin:0;}
+  .sprout{width:34px;height:34px;border:2px solid var(--panel-edge);border-top-color:var(--gold);border-radius:50%;animation:spin 1s linear infinite;}
+  @keyframes spin{to{transform:rotate(360deg);}}
+  #hud{position:fixed;inset:0;pointer-events:none;z-index:20;}
+  .panel{position:absolute;background:var(--panel);border:1px solid var(--panel-edge);
+    border-radius:10px;padding:10px 14px;backdrop-filter:blur(6px);
+    box-shadow:0 6px 22px rgba(0,0,0,.45), inset 0 0 0 1px rgba(217,178,90,.06);}
+  #status{top:16px;left:16px;min-width:180px;}
+  #status .row{display:flex;justify-content:space-between;gap:18px;font-size:14px;line-height:1.7;}
+  #status .label{color:var(--gold);letter-spacing:1px;}
+  #status .value{color:var(--gold-soft);}
+  #weatherCard{top:16px;right:16px;text-align:right;}
+  #weatherCard .w-name{color:var(--gold-soft);font-size:15px;letter-spacing:2px;}
+  #weatherCard .w-sub{color:var(--gold);opacity:.65;font-size:11px;letter-spacing:1px;}
+  #hint{bottom:16px;left:50%;transform:translateX(-50%);
+    display:flex;gap:18px;align-items:center;flex-wrap:wrap;justify-content:center;
+    font-size:12px;letter-spacing:.5px;color:var(--gold-soft);max-width:94vw;}
+  #hint .grp{display:flex;align-items:center;gap:7px;}
+  #hint .grp-label{color:var(--gold);opacity:.6;font-size:10px;letter-spacing:1.5px;text-transform:uppercase;}
+  #hint .sep{width:1px;height:18px;background:var(--panel-edge);opacity:.6;}
+  #hint .key{display:inline-block;background:rgba(217,178,90,0.14);border:1px solid var(--panel-edge);
+    border-radius:4px;padding:1px 6px;color:var(--gold-soft);font-size:11px;font-weight:bold;min-width:14px;text-align:center;}
+  #hint .act{color:var(--gold-soft);opacity:.9;}
+  .title-rule{height:1px;background:linear-gradient(90deg,transparent,var(--gold),transparent);margin:8px 0;opacity:.5;}
+
+  /* Themed scrollbar — gold on dark, matching the game UI */
+  .gold-scroll{ scrollbar-width:thin; scrollbar-color:var(--gold) rgba(217,178,90,0.10); }
+  .gold-scroll::-webkit-scrollbar{ width:10px; }
+  .gold-scroll::-webkit-scrollbar-track{ background:rgba(217,178,90,0.08); border-radius:8px; }
+  .gold-scroll::-webkit-scrollbar-thumb{
+    background:linear-gradient(180deg,var(--gold-soft),var(--gold));
+    border-radius:8px; border:2px solid rgba(16,26,19,0.6);
+  }
+  .gold-scroll::-webkit-scrollbar-thumb:hover{ background:var(--gold-soft); }
+</style>
+</head>
+<body>
+  <div id="veil">
+    <div class="sprout"></div>
+    <h1>HOLLOWGROVE</h1>
+    <p>tending the grove…</p>
+  </div>
+
+  <div id="hud">
+    <div id="status" class="panel">
+      <div class="row"><span class="label">Grove</span><span class="value">Hollowgrove</span></div>
+      <div class="title-rule"></div>
+      <div class="row"><span class="label">Day</span><span class="value" id="dayVal">1</span></div>
+      <div class="row"><span class="label">Time</span><span class="value" id="timeVal">Dawn</span></div>
+    </div>
+    <div id="weatherCard" class="panel">
+      <div class="w-name" id="wName">Sunny</div>
+      <div class="w-sub" id="wSub">clear skies over the grove</div>
+    </div>
+    <div id="hint" class="panel">
+      <div class="grp"><span class="grp-label">Move</span><span class="key">W</span><span class="key">A</span><span class="key">S</span><span class="key">D</span></div>
+      <div class="sep"></div>
+      <div class="grp"><span class="grp-label">Garden</span><span class="key">Space</span><span class="act">plant/build</span><span class="key">F</span><span class="act">harvest / pick up</span><span class="key">B</span><span class="act">dig</span></div>
+      <div class="sep"></div>
+      <div class="grp"><span class="grp-label">Build</span><span class="key">R</span><span class="act">rotate</span><span class="key">T</span><span class="act">trade</span></div>
+      <div class="sep"></div>
+      <div class="grp"><span class="grp-label">View</span><span class="key">Q</span><span class="key">E</span><span class="act">rotate</span><span class="key">1</span><span class="act">weather</span></div>
+    </div>
+
+    <!-- Inventory: an icon that's normally collapsed; expands on the plot -->
+    <div id="invIcon" class="panel" style="bottom:78px;left:16px;display:flex;align-items:center;gap:8px;cursor:pointer;pointer-events:auto;">
+      <span style="font-size:18px;">🌱</span>
+      <span style="color:var(--gold-soft);font-size:13px;letter-spacing:1px;">Seeds</span>
+    </div>
+
+    <div id="invPanel" class="panel" style="bottom:78px;left:16px;min-width:240px;display:none;pointer-events:auto;">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <span style="color:var(--gold);letter-spacing:1px;font-size:11px;">SEED &amp; CUTTING LIBRARY</span>
+        <span id="invClose" style="color:var(--gold);cursor:pointer;font-size:12px;opacity:.7;">▾</span>
+      </div>
+      <div class="title-rule"></div>
+      <div id="invList" style="display:flex;flex-direction:column;gap:5px;max-height:260px;overflow:auto;"></div>
+    </div>
+
+    <!-- Harvest basket -->
+    <div id="basket" class="panel" style="bottom:78px;right:16px;min-width:150px;text-align:right;">
+      <div style="color:var(--gold);letter-spacing:1px;font-size:11px;">BASKET</div>
+      <div class="title-rule"></div>
+      <div id="basketList" style="font-size:13px;line-height:1.6;color:var(--gold-soft);opacity:.85;">empty</div>
+    </div>
+
+    <!-- Floating action prompt near player -->
+    <div id="prompt" class="panel" style="display:none;padding:6px 12px;font-size:12px;color:var(--gold-soft);letter-spacing:1px;"></div>
+
+    <!-- Trade button (Phase 4) -->
+    <div id="tradeBtn" class="panel" style="bottom:78px;left:50%;transform:translateX(-50%);cursor:pointer;pointer-events:auto;display:flex;align-items:center;gap:8px;">
+      <span style="font-size:16px;">⛁</span>
+      <span style="color:var(--gold-soft);font-size:13px;letter-spacing:1px;">Trade</span>
+    </div>
+
+    <!-- Trade modal -->
+    <div id="tradeModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.62);z-index:60;flex-direction:column;align-items:center;justify-content:flex-start;padding:40px 16px;overflow-y:auto;-webkit-overflow-scrolling:touch;pointer-events:auto;">
+      <div id="tradeInner" style="margin:0 auto;width:100%;max-width:540px;max-height:calc(100vh - 80px);display:flex;flex-direction:column;position:relative;background:rgba(16,26,19,0.94);border:1px solid rgba(217,178,90,0.45);border-radius:10px;padding:18px 22px;box-shadow:0 8px 30px rgba(0,0,0,.55);pointer-events:auto;">
+        <div style="display:flex;justify-content:space-between;align-items:center;flex:0 0 auto;">
+          <span style="color:var(--gold);letter-spacing:2px;font-size:12px;">WANDERING TRADER</span>
+          <button id="tradeClose" type="button" style="background:rgba(217,178,90,0.18);border:1px solid rgba(217,178,90,0.55);color:var(--gold-soft);cursor:pointer;font-size:14px;padding:3px 11px;border-radius:6px;font-family:inherit;line-height:1;pointer-events:auto;">✕</button>
+        </div>
+        <div class="title-rule" style="flex:0 0 auto;"></div>
+        <div style="color:var(--gold-soft);opacity:.7;font-size:11px;letter-spacing:1px;margin-bottom:12px;flex:0 0 auto;">Bring the right produce — trade for rare seeds &amp; builds.</div>
+        <div id="tradeList" class="gold-scroll" style="display:flex;flex-direction:column;gap:10px;overflow-y:auto;-webkit-overflow-scrolling:touch;flex:1 1 auto;min-height:0;padding-right:6px;pointer-events:auto;"></div>
+      </div>
+    </div>
+  </div>
+
+  <script type="importmap">
+  { "imports": { "three": "https://cdnjs.cloudflare.com/ajax/libs/three.js/0.160.0/three.module.min.js" }}
+  </script>
+
+  <script type="module">
+  import * as THREE from 'three';
+
+  /* ===========================================================
+     HOLLOWGROVE — Phase 1 (isometric + voxel restyle)
+     - Orthographic isometric camera (fixed angle, Q/E to spin)
+     - Everything built from cubes/boxes for a voxel look
+     =========================================================== */
+
+  // ---------- Renderer ----------
+  const renderer = new THREE.WebGLRenderer({ antialias:false }); // crisper voxel edges
+  renderer.setSize(innerWidth, innerHeight);
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFShadowMap; // harder shadow edges suit voxel
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  document.body.appendChild(renderer.domElement);
+
+  const scene = new THREE.Scene();
+
+  // ---------- Isometric (orthographic) camera ----------
+  let viewSize = 22;           // larger = more zoomed out (broader grove view)
+  let isoAngle = Math.PI/4;    // rotates around the scene with Q/E
+  const camera = new THREE.OrthographicCamera(-1,1,1,-1,0.1,200);
+  function setupOrtho(){
+    const aspect = innerWidth/innerHeight;
+    camera.left = -viewSize*aspect; camera.right = viewSize*aspect;
+    camera.top = viewSize; camera.bottom = -viewSize;
+    camera.updateProjectionMatrix();
+  }
+  setupOrtho();
+
+  // ---------- Lighting (weather drives these) ----------
+  const hemi = new THREE.HemisphereLight(0x9bb892, 0x2a2418, 0.55);
+  scene.add(hemi);
+
+  // Pick a shadow resolution based on device. Hi-DPI phones and low core
+  // counts get 1024 to stay smooth; desktops get the crisper 2048.
+  const SHADOW_RES = (navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 4) ||
+                     (devicePixelRatio > 2) ? 1024 : 2048;
+
+  const sun = new THREE.DirectionalLight(0xfff0c9, 1.7);
+  sun.position.set(16, 26, 12);
+  sun.castShadow = true;
+  sun.shadow.mapSize.set(SHADOW_RES, SHADOW_RES);
+  sun.shadow.camera.near=1; sun.shadow.camera.far=90;
+  const s=34;
+  sun.shadow.camera.left=-s; sun.shadow.camera.right=s; sun.shadow.camera.top=s; sun.shadow.camera.bottom=-s;
+  sun.shadow.bias=-0.0006;
+  scene.add(sun); scene.add(sun.target);
+  const ambient = new THREE.AmbientLight(0x3a4234, 0.4);
+  scene.add(ambient);
+
+  // Moon — a softer directional light that arcs opposite the sun. Casts
+  // shadows only when high enough to be useful.
+  const moon = new THREE.DirectionalLight(0xb8c8e8, 0.0);
+  moon.castShadow = false;
+  moon.shadow.mapSize.set(1024,1024);
+  moon.shadow.camera.near=1; moon.shadow.camera.far=90;
+  moon.shadow.camera.left=-s; moon.shadow.camera.right=s;
+  moon.shadow.camera.top=s; moon.shadow.camera.bottom=-s;
+  moon.shadow.bias=-0.0006;
+  scene.add(moon); scene.add(moon.target);
+
+  // Visible sun — a bright sphere placed at the same world position as the
+  // directional light so it visually lines up with the cast shadows.
+  const sunMesh = new THREE.Mesh(
+    new THREE.SphereGeometry(2.6, 24, 24),
+    new THREE.MeshBasicMaterial({color:0xfff4c9, fog:false})
+  );
+  scene.add(sunMesh);
+  // soft halo billboard around the sun
+  const sunHalo = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: makeRadialTexture('#fff6c9','#fff6c900'),
+    color:0xffffff, transparent:true, opacity:0.85,
+    blending:THREE.AdditiveBlending, depthWrite:false, fog:false
+  }));
+  sunHalo.scale.set(11, 11, 1);
+  scene.add(sunHalo);
+
+  // Visible moon — pale cream sphere with a soft cool halo
+  const moonMesh = new THREE.Mesh(
+    new THREE.SphereGeometry(2.0, 24, 24),
+    new THREE.MeshBasicMaterial({color:0xeae8d0, fog:false})
+  );
+  scene.add(moonMesh);
+  const moonHalo = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: makeRadialTexture('#d8e0f0','#d8e0f000'),
+    color:0xc8d4e8, transparent:true, opacity:0.55,
+    blending:THREE.AdditiveBlending, depthWrite:false, fog:false
+  }));
+  moonHalo.scale.set(9, 9, 1);
+  scene.add(moonHalo);
+
+  // Star field — points scattered on the upper hemisphere of a dome that sits
+  // INSIDE the camera's far plane (200). Fixed-size points (no attenuation) so
+  // they read as crisp specks rather than shrinking to nothing at distance.
+  const STAR_COUNT = 900;
+  const starGeo = new THREE.BufferGeometry();
+  const starPos = new Float32Array(STAR_COUNT * 3);
+  for(let i = 0; i < STAR_COUNT; i++){
+    const u = Math.random(), v = Math.random();
+    const theta = 2 * Math.PI * u;
+    const phi = Math.acos(2 * v - 1);
+    const r = 120;                       // inside the 200 far plane
+    starPos[i*3]   = r * Math.sin(phi) * Math.cos(theta);
+    starPos[i*3+1] = Math.abs(r * Math.cos(phi)) + 8;
+    starPos[i*3+2] = r * Math.sin(phi) * Math.sin(theta);
+  }
+  starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
+  const stars = new THREE.Points(starGeo, new THREE.PointsMaterial({
+    color: 0xffffff, size: 2.4, sizeAttenuation:false,
+    transparent:true, opacity:0, fog:false, depthWrite:false
+  }));
+  stars.renderOrder = -1;                // draw behind everything
+  scene.add(stars);
+
+  // ---------- Drifting low-poly clouds (day sky) ----------
+  // Clusters of flat white boxes high overhead that drift slowly and fade
+  // out at night. Kept inside the far plane and unaffected by fog.
+  const clouds = new THREE.Group();
+  const cloudMat = new THREE.MeshBasicMaterial({ color:0xffffff, transparent:true, opacity:0.92, fog:false });
+  function makeCloud(){
+    const c = new THREE.Group();
+    const puffs = 3 + (Math.random()*3|0);
+    for(let i=0;i<puffs;i++){
+      const w = 6 + Math.random()*7, h = 2.5 + Math.random()*2, d = 4 + Math.random()*4;
+      const m = new THREE.Mesh(new THREE.BoxGeometry(w,h,d), cloudMat);
+      m.position.set((Math.random()-0.5)*12, (Math.random()-0.5)*1.5, (Math.random()-0.5)*8);
+      c.add(m);
+    }
+    return c;
+  }
+  for(let i=0;i<8;i++){
+    const cloud = makeCloud();
+    cloud.position.set((Math.random()-0.5)*90, 26 + Math.random()*12, (Math.random()-0.5)*90);
+    cloud.userData.drift = 1.5 + Math.random()*2;   // x-speed
+    clouds.add(cloud);
+  }
+  scene.add(clouds);
+
+  function makeRadialTexture(inner, outer){
+    const c = document.createElement('canvas'); c.width=c.height=128;
+    const ctx = c.getContext('2d');
+    const g = ctx.createRadialGradient(64,64, 0, 64,64, 64);
+    g.addColorStop(0, inner);
+    g.addColorStop(1, outer);
+    ctx.fillStyle = g; ctx.fillRect(0,0,128,128);
+    const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+    return t;
+  }
+
+  // ---------- Voxel helpers ----------
+  // Shared box geometry, scaled per-voxel. Flat shading + low roughness reads "voxel".
+  const BOX = new THREE.BoxGeometry(1,1,1);
+  const vmat = (color)=> new THREE.MeshStandardMaterial({ color, flatShading:true, roughness:1, metalness:0 });
+  // make one cube
+  function vox(color, sx,sy,sz, x,y,z, parent){
+    const m = new THREE.Mesh(BOX, vmat(color));
+    m.scale.set(sx,sy,sz); m.position.set(x,y,z);
+    m.castShadow = true; m.receiveShadow = true;
+    parent.add(m); return m;
+  }
+
+  const world = new THREE.Group();
+  scene.add(world);
+
+  // ---------- Ground: voxel grass field + soil plot ----------
+  const ground = new THREE.Mesh(new THREE.BoxGeometry(60,1,60), vmat(0x3f5d34));
+  ground.position.y = -0.5; ground.receiveShadow = true;
+  world.add(ground);
+
+  const PLOT = 16;
+  const plot = new THREE.Mesh(new THREE.BoxGeometry(PLOT,0.5,PLOT), vmat(0x5a4329));
+  plot.position.y = 0.05; plot.receiveShadow = true;
+  world.add(plot);
+
+  // tile grid on the plot (planting next phase)
+  const grid = new THREE.GridHelper(PLOT, 8, 0x8a6a3a, 0x6b5128);
+  grid.position.y = 0.31; grid.material.opacity = 0.4; grid.material.transparent = true;
+  world.add(grid);
+
+  // ---------- Voxel trees (stacked cubes) ----------
+  function makeTree(x,z,h=3){
+    const g = new THREE.Group();
+    // trunk
+    vox(0x3b2a1c, 0.6, h, 0.6, 0, h/2, 0, g);
+    // leaf cluster: a few staggered cubes
+    const greens=[0x21402a,0x1c3624,0x2a4d31];
+    const lc = greens[(Math.random()*greens.length)|0];
+    vox(lc, 2.4, 1.6, 2.4, 0, h+0.6, 0, g);
+    vox(greens[(Math.random()*3)|0], 1.6, 1.4, 1.6, 0.4, h+1.7, -0.3, g);
+    vox(greens[(Math.random()*3)|0], 1.2, 1.1, 1.2, -0.4, h+1.6, 0.4, g);
+    g.position.set(x,0,z);
+    g.rotation.y = ((Math.random()*4)|0)*Math.PI/2; // snap to 90° for voxel feel
+    return g;
+  }
+  const forest = new THREE.Group();
+  const R=24;
+  for(let a=0;a<Math.PI*2;a+=0.3){
+    const rr=R+(Math.random()*4-2);
+    forest.add(makeTree(Math.cos(a)*rr, Math.sin(a)*rr, 2.5+Math.random()*2.5));
+  }
+  world.add(forest);
+
+  // voxel rocks
+  for(let i=0;i<14;i++){
+    const ang=Math.random()*Math.PI*2, rad=11+Math.random()*10;
+    const sz=0.6+Math.random()*0.7;
+    const r=vox(0x4a4a44, sz,sz*0.8,sz, Math.cos(ang)*rad, sz*0.4, Math.sin(ang)*rad, world);
+    r.rotation.y=((Math.random()*4)|0)*Math.PI/2;
+  }
+
+  // ---------- Voxel player (all cubes) ----------
+  const player = new THREE.Group();
+  vox(0x6b8f4e, 0.7,0.8,0.5, 0,0.9,0, player);      // torso
+  vox(0xd8a978, 0.55,0.55,0.55, 0,1.55,0, player);  // head
+  vox(0x9a6b34, 0.85,0.18,0.85, 0,1.85,0, player);  // hat brim
+  vox(0x9a6b34, 0.5,0.45,0.5, 0,2.1,0, player);     // hat top
+  const legL = vox(0x4a3320, 0.26,0.6,0.26, -0.2,0.4,0, player);
+  const legR = vox(0x4a3320, 0.26,0.6,0.26,  0.2,0.4,0, player);
+  player.position.set(0,0,6);
+  scene.add(player);
+
+  // ---------- Input ----------
+  const keys={};
+  addEventListener('keydown',e=>{
+    keys[e.code]=true;
+    if(e.code==='Digit1') cycleWeather();
+    if(e.code==='KeyQ') isoAngle -= Math.PI/2;   // rotate iso view 90°
+    if(e.code==='KeyE') isoAngle += Math.PI/2;
+    if(e.code==='KeyR' && placingBuilding){
+      buildingRotation = (buildingRotation+1) % 4;
+      refreshPreviewGhost();
+      flash('Rotation '+(buildingRotation*90)+'°');
+    }
+    if(e.code==='KeyB'){ digHere(); }
+    if(e.code==='KeyT'){ setTradeOpen(tradeModal.style.display==='none'); }
+    if(e.code==='Escape'){ setTradeOpen(false); }
+  });
+  addEventListener('keyup',e=>{keys[e.code]=false;});
+
+  // ---------- Weather ----------
+  const WEATHERS={
+    sunny:{name:'Sunny',sub:'clear skies over the grove',sun:2.1,fog:0x2a3a30,fogNear:30,fogFar:90,bg:0x3a5240,hemi:0.75,rain:0},
+    overcast:{name:'Overcast',sub:'a soft grey hush',sun:1.0,fog:0x384238,fogNear:40,fogFar:110,bg:0x4a544c,hemi:0.65,rain:0},
+    rain:{name:'Light rain',sub:'gentle rain on the leaves',sun:0.8,fog:0x2e3630,fogNear:34,fogFar:100,bg:0x384038,hemi:0.62,rain:1}
+  };
+  const order=['sunny','overcast','rain']; let wIndex=0;
+  scene.fog=new THREE.Fog(0x223027,26,80);
+
+  // ---------- Rain: sparse, thin vertical streaks (light rain, not a curtain) ----------
+  // Drawn as short line segments so each drop reads as a faint streak rather than
+  // a fat dot. Fewer drops, lower opacity, and a tighter area keep visibility high.
+  const RAIN_N = 380;
+  const rainGeo = new THREE.BufferGeometry();
+  const rainPos = new Float32Array(RAIN_N * 2 * 3);   // 2 verts per streak
+  const rainY = new Float32Array(RAIN_N);             // track top-y of each streak
+  const RAIN_AREA = 34, RAIN_TOP = 22, STREAK = 0.7;
+  for(let i=0;i<RAIN_N;i++){
+    const x=(Math.random()-0.5)*RAIN_AREA, z=(Math.random()-0.5)*RAIN_AREA, y=Math.random()*RAIN_TOP;
+    rainY[i]=y;
+    rainPos[i*6]   = x; rainPos[i*6+1] = y;          rainPos[i*6+2] = z;  // top
+    rainPos[i*6+3] = x; rainPos[i*6+4] = y - STREAK; rainPos[i*6+5] = z;  // bottom
+  }
+  rainGeo.setAttribute('position', new THREE.BufferAttribute(rainPos, 3));
+  const rain = new THREE.LineSegments(rainGeo, new THREE.LineBasicMaterial({
+    color:0xbcd6e8, transparent:true, opacity:0.34, fog:true
+  }));
+  rain.visible=false; scene.add(rain);
+
+  // ---------- Cloud shadows: soft dark patches that drift over the ground ----------
+  // Used in overcast (and lightly in rain) to suggest clouds passing overhead,
+  // instead of a view-blocking fog. Each is a large faded dark plane just above
+  // the ground that slides across and wraps around.
+  const cloudShadows = new THREE.Group();
+  const shadowTex = makeRadialTexture('rgba(0,0,0,0.55)', 'rgba(0,0,0,0)');
+  for(let i=0;i<4;i++){
+    const size = 22 + Math.random()*16;
+    const m = new THREE.Mesh(
+      new THREE.PlaneGeometry(size, size*0.72),
+      new THREE.MeshBasicMaterial({ map:shadowTex, transparent:true, opacity:0, depthWrite:false, fog:false })
+    );
+    m.rotation.x = -Math.PI/2;
+    m.position.set((Math.random()-0.5)*70, 0.5, (Math.random()-0.5)*70);
+    m.userData.drift = 2.2 + Math.random()*2.4;
+    cloudShadows.add(m);
+  }
+  scene.add(cloudShadows);
+
+  let cur={sun:1.7,hemi:0.55};
+  const bgColor=new THREE.Color(WEATHERS.sunny.bg);
+  const fogColor=new THREE.Color(WEATHERS.sunny.fog);
+  let tgt={...WEATHERS.sunny};
+  let weatherKey='sunny';
+  function applyWeather(k){const w=WEATHERS[k];tgt=w; weatherKey=k;
+    document.getElementById('wName').textContent=w.name;
+    document.getElementById('wSub').textContent=w.sub;
+    rain.visible=w.rain>0;}
+  function cycleWeather(){wIndex=(wIndex+1)%order.length;applyWeather(order[wIndex]);}
+  applyWeather('sunny');
+
+  // ---------- Day clock ----------
+  let dayTime=0.25, day=1;
+  const phases=[
+    [0.0,  'Late Night'],
+    [0.2,  'Pre-Dawn'],
+    [0.25, 'Dawn'],
+    [0.4,  'Morning'],
+    [0.55, 'Midday'],
+    [0.7,  'Afternoon'],
+    [0.78, 'Dusk'],
+    [0.88, 'Evening'],
+    [1,    'Night']
+  ];
+  function phaseName(t){for(const[c,n]of phases)if(t<=c)return n;return 'Night';}
+
+  /* ===========================================================
+     PLANTING SYSTEM (Phase 2)
+     Each plant has a category whose stages match the design:
+       veg     : seed -> sprout -> flower -> produce
+       ftree   : cutting -> mature -> flower -> produce
+       tree    : cutting -> mature -> flower            (non-fruiting)
+       flower  : seed -> sprout -> flower
+       root    : seed -> sprout -> swell -> harvest     (researched: no flower)
+       allium  : seed -> sprout -> bulb -> harvest      (researched: no flower)
+     The LAST stage is harvestable; harvesting yields `produce` items.
+     =========================================================== */
+
+  // tile grid: 8x8 over the 16-unit plot => 2 units per tile
+  const TILES = 8, TILE = PLOT/TILES;          // 2 units
+  const occupied = {};                          // "col,row" -> plant object
+  const plants = [];                            // active plants
+  const bedTiles = new Set();                   // tile keys covered by any raised bed (Phase 3)
+  const bedBed = {};                            // tile key -> bed object (so we can find the bed a plant sits on)
+  const digTiles = new Set();                   // tile keys the player has dug up (Phase 4)
+  const digMeshes = {};                         // tile key -> soil mesh (so we can remove on un-dig if we ever add that)
+  const digBounds = 25;                         // dig allowed within +/-25 tiles of origin (the grass field)
+
+  // Each entry carries economy data:
+  //   tier 'basic' = free & unlimited from the start
+  //   tier 'rare'  = hidden until `revealAt` total harvests, then buyable for `cost` produce
+  //   yields: the produce name a harvest puts in your basket (defaults to name)
+  const CATALOG = [
+    { name:'Marigold',    cat:'flower', start:'seed',    tier:'basic', swatch:0xe8a33d, parts:{stem:0x4f7a3a, bloom:0xe8a33d} },
+    { name:'Bluebell',    cat:'flower', start:'seed',    tier:'basic', swatch:0x6f7bd6, parts:{stem:0x4f7a3a, bloom:0x6f7bd6} },
+    { name:'Tomato',      cat:'veg',    start:'seed',    tier:'basic', swatch:0xd9433a, parts:{stem:0x3f6b34, bloom:0xf0e06a, fruit:0xd9433a} },
+    { name:'Carrot',      cat:'root',   start:'seed',    tier:'basic', swatch:0xe07b2e, parts:{top:0x4f7a3a, root:0xe07b2e} },
+    { name:'Onion',       cat:'allium', start:'seed',    tier:'basic', swatch:0xc9b27a, parts:{top:0x4f7a3a, bulb:0xc9b27a} },
+    // --- rare: revealed by milestone, then bought with produce ---
+    { name:'Pumpkin',     cat:'veg',    start:'seed',    tier:'rare', revealAt:3,  cost:4,  swatch:0xd98032, parts:{stem:0x3f6b34, bloom:0xf0e06a, fruit:0xd98032} },
+    { name:'Lavender',    cat:'flower', start:'seed',    tier:'rare', revealAt:5,  cost:5,  swatch:0x9a78d6, parts:{stem:0x4f7a3a, bloom:0x9a78d6} },
+    { name:'Apple Tree',  cat:'ftree',  start:'cutting', tier:'rare', revealAt:8,  cost:8,  foot:2, swatch:0xc8402f, parts:{trunk:0x3b2a1c, leaf:0x2a4d31, bloom:0xf0d0d6, fruit:0xc8402f} },
+    { name:'Cherry Tree', cat:'ftree',  start:'cutting', tier:'rare', revealAt:12, cost:10, foot:2, swatch:0xe35d7a, parts:{trunk:0x3b2a1c, leaf:0x2a4d31, bloom:0xf6c6d6, fruit:0xe35d7a} },
+    { name:'Oak',         cat:'tree',   start:'cutting', tier:'rare', revealAt:15, cost:12, foot:2, swatch:0x2a4d31, parts:{trunk:0x3b2a1c, leaf:0x274a2f, bloom:0xdfe3a0} },
+
+    // ---- Herbs: bed-only plants (Phase 3) ----
+    // Herbs share the same leafy model with palette swaps; their cat is 'herb'
+    // and plantHere enforces that they only grow on a raised bed tile.
+    { name:'Basil',    cat:'herb', start:'seed', tier:'basic', swatch:0x4fa84a, parts:{stem:0x4a7a3a, leaf:0x4fa84a, bloom:0xe8e8e8} },
+    { name:'Rosemary', cat:'herb', start:'seed', tier:'basic', swatch:0x5a8060, parts:{stem:0x5a4030, leaf:0x5a8060, bloom:0xb89cd6} },
+    { name:'Thyme',    cat:'herb', start:'seed', tier:'basic', swatch:0x6a8a4a, parts:{stem:0x4a3a20, leaf:0x6a8a4a, bloom:0xd0a0d0} },
+    { name:'Mint',     cat:'herb', start:'seed', tier:'basic', swatch:0x3fa060, parts:{stem:0x4a7a3a, leaf:0x3fa060, bloom:0xf0f0f0} },
+    { name:'Parsley',  cat:'herb', start:'seed', tier:'basic', swatch:0x4a9a3a, parts:{stem:0x4a7a3a, leaf:0x4a9a3a, bloom:0xe0e890} },
+    { name:'Sage',     cat:'herb', start:'seed', tier:'basic', swatch:0x8aa890, parts:{stem:0x5a5040, leaf:0x8aa890, bloom:0xc8a0d0} },
+  ];
+
+  // footprint defaults to 1x1; trees declare foot:2 (a 2x2 block of tiles)
+  CATALOG.forEach(c=>{ if(!c.foot) c.foot=1; });
+
+  // ownership: basics start owned; rares become owned once bought
+  CATALOG.forEach(c=>{ c.owned = (c.tier==='basic'); c.revealed = (c.tier==='basic'); });
+  let totalHarvested = 0;       // drives milestone reveals
+
+  // ---------- BUILDINGS & DECOR (Phase 3) ----------
+  // Same library panel as seeds/cuttings, rendered in its own section.
+  //   kind 'decor' : small free items, available from the start
+  //   kind 'build' : large builds, bought with produce, milestone-revealed
+  //   kind 'fence' : 1-tile pieces that auto-connect into continuous walls
+  const BUILDINGS = [
+    { name:'Stepping Stone', kind:'decor', foot:1,  cost:0, swatch:0x8a8474 },
+    { name:'Stone Lantern',  kind:'decor', foot:1,  cost:0, swatch:0xc8a060 },
+    { name:'Mushroom Ring',  kind:'decor', foot:1,  cost:0, swatch:0xc89070 },
+    { name:'Bird Bath',      kind:'decor', foot:1,  cost:0, swatch:0x9ab8c8 },
+    { name:'Wooden Fence',   kind:'fence', foot:1,  cost:0, swatch:0x8a6a3a },
+    { name:'Raised Bed',     kind:'bed',   footW:2, footH:3, cost:0, swatch:0x6cae9d },
+    { name:'Garden Bench',   kind:'build', foot:2,  cost:3,  revealAt:2,  swatch:0x6b4a2a },
+    { name:'Pagoda',         kind:'build', foot:2,  cost:12, revealAt:10, swatch:0x8b3a2a },
+    { name:'Koi Pond',       kind:'build', foot:3,  cost:20, revealAt:18, swatch:0x4a7a8a },
+  ];
+  BUILDINGS.forEach(c=>{
+    c.owned    = (c.cost===0);
+    c.revealed = (c.cost===0);
+    c.icon     = null;
+  });
+  let selectedBuild     = 0;   // index into BUILDINGS
+  let placingBuilding   = false; // library "mode"
+  let buildingRotation  = 0;   // 0..3 quarter turns
+
+  // stage sequences per category (final element = harvestable)
+  const STAGES = {
+    flower: ['seed','sprout','flower'],
+    veg:    ['seed','sprout','flower','produce'],
+    root:   ['seed','sprout','swell','harvest'],
+    allium: ['seed','sprout','bulb','harvest'],
+    ftree:  ['cutting','mature','flower','produce'],
+    tree:   ['cutting','mature','flower'],
+    herb:   ['seed','sprout','leafy','produce'],
+  };
+
+  let selectedSeed = 0;        // index into CATALOG of the chosen seed/cutting
+  let onPlot = false;          // are we standing on the soil? (drives inventory popup)
+  let lastPreviewKey = '';     // change-signature gate for the footprint preview
+
+  // ---- inventory panel rendering ----
+  const invIcon=document.getElementById('invIcon');
+  const invPanel=document.getElementById('invPanel');
+  const invList=document.getElementById('invList');
+  let invForceOpen=false;      // user clicked the icon to keep it open
+
+  function hex(n){ return '#'+n.toString(16).padStart(6,'0'); }
+
+  function renderLibrary(){
+    invList.innerHTML='';
+    const total = basketTotal();   // compute once, reused by all locked rows
+
+    // ---- Section 1: Seeds & Cuttings ----
+    const seedHeader = document.createElement('div');
+    seedHeader.style.cssText='color:var(--gold);letter-spacing:2px;font-size:10px;margin:6px 4px 4px;opacity:.75;';
+    seedHeader.textContent = 'SEEDS & CUTTINGS';
+    invList.appendChild(seedHeader);
+
+    CATALOG.forEach((c,i)=>{
+      // milestone reveal
+      if(c.tier==='rare' && !c.revealed && totalHarvested>=c.revealAt) c.revealed=true;
+      if(!c.revealed) return;  // still hidden
+
+      const active = !placingBuilding && i===selectedSeed;
+      const row=document.createElement('div');
+      row.style.cssText='display:flex;align-items:center;gap:9px;padding:5px 7px;border-radius:7px;cursor:pointer;'+
+        'border:1px solid '+(active?'var(--gold)':'transparent')+';'+
+        'background:'+(active?'rgba(217,178,90,0.12)':'transparent')+';';
+
+      // isometric icon (falls back to a colour chip if not generated yet)
+      const sw=document.createElement('div');
+      sw.style.cssText='width:34px;height:34px;flex:0 0 auto;border-radius:6px;border:1px solid var(--panel-edge);'+
+        'background:rgba(0,0,0,0.18);background-size:contain;background-repeat:no-repeat;background-position:center;';
+      if(c.icon) sw.style.backgroundImage='url('+c.icon+')';
+      else sw.style.background=hex(c.swatch);
+      row.appendChild(sw);
+
+      const txt=document.createElement('div'); txt.style.flex='1';
+      const from=c.start==='cutting'?'cutting':'seed';
+      const footTxt = c.foot>1 ? ' · '+c.foot+'×'+c.foot : '';
+      txt.innerHTML='<div style="color:var(--gold-soft);font-size:13px;">'+c.name+'</div>'+
+        '<div style="color:var(--gold);opacity:.55;font-size:10px;letter-spacing:1px;">'+c.cat.toUpperCase()+' · '+from+footTxt+'</div>';
+      row.appendChild(txt);
+
+      // right-side status
+      const tag=document.createElement('div');
+      tag.style.cssText='font-size:11px;letter-spacing:1px;';
+      if(c.owned){
+        tag.style.color='var(--gold)'; tag.style.opacity='.6';
+        tag.textContent = c.tier==='basic' ? 'FREE' : 'OWNED';
+      } else {
+        const can = total>=c.cost;
+        tag.style.color = can ? 'var(--gold-soft)' : '#8a7a55';
+        tag.textContent = 'Buy · '+c.cost+'🧺';
+      }
+      row.appendChild(tag);
+
+      row.onclick=()=>{
+        placingBuilding = false;
+        if(c.owned){ selectedSeed=i; renderLibrary(); refreshPreviewGhost(); }
+        else { buySeed(i); }
+      };
+      invList.appendChild(row);
+    });
+
+    // ---- Section 2: Buildings & Decor ----
+    const buildHeader = document.createElement('div');
+    buildHeader.style.cssText='color:var(--gold);letter-spacing:2px;font-size:10px;margin:14px 4px 4px;opacity:.75;';
+    buildHeader.textContent = 'BUILDINGS & DECOR';
+    invList.appendChild(buildHeader);
+
+    BUILDINGS.forEach((c,i)=>{
+      if(c.revealAt && !c.revealed && totalHarvested>=c.revealAt) c.revealed=true;
+      if(!c.revealed) return;
+
+      const active = placingBuilding && i===selectedBuild;
+      const row=document.createElement('div');
+      row.style.cssText='display:flex;align-items:center;gap:9px;padding:5px 7px;border-radius:7px;cursor:pointer;'+
+        'border:1px solid '+(active?'var(--gold)':'transparent')+';'+
+        'background:'+(active?'rgba(217,178,90,0.12)':'transparent')+';';
+
+      // colour swatch (buildings skip the icon generator in this phase)
+      const sw=document.createElement('div');
+      sw.style.cssText='width:34px;height:34px;flex:0 0 auto;border-radius:6px;border:1px solid var(--panel-edge);'+
+        'background:linear-gradient(135deg,'+hex(c.swatch)+','+hex(shade(c.swatch,-0.25))+');';
+      row.appendChild(sw);
+
+      const txt=document.createElement('div'); txt.style.flex='1';
+      const footTxt = (c.footW ? ' · '+c.footW+'×'+c.footH : (c.foot>1 ? ' · '+c.foot+'×'+c.foot : ''));
+      const sublabel = c.kind==='fence' ? 'FENCE · auto-links'
+                     : c.kind==='bed'   ? 'BED · herbs only'
+                     : c.kind==='build' ? 'BUILD'
+                     :                    'DECOR';
+      txt.innerHTML='<div style="color:var(--gold-soft);font-size:13px;">'+c.name+'</div>'+
+        '<div style="color:var(--gold);opacity:.55;font-size:10px;letter-spacing:1px;">'+sublabel+footTxt+'</div>';
+      row.appendChild(txt);
+
+      const tag=document.createElement('div');
+      tag.style.cssText='font-size:11px;letter-spacing:1px;';
+      if(c.owned){
+        tag.style.color='var(--gold)'; tag.style.opacity='.6';
+        tag.textContent = 'FREE';
+      } else {
+        const can = total>=c.cost;
+        tag.style.color = can ? 'var(--gold-soft)' : '#8a7a55';
+        tag.textContent = 'Buy · '+c.cost+'🧺';
+      }
+      row.appendChild(tag);
+
+      row.onclick=()=>{
+        if(c.owned){
+          placingBuilding = true;
+          selectedBuild = i;
+          buildingRotation = 0;   // reset rotation on switch
+          renderLibrary();
+          refreshPreviewGhost();
+        } else { buyBuilding(i); }
+      };
+      invList.appendChild(row);
+    });
+  }
+
+  // lighten / darken a hex colour by amount in [-1..1]
+  function shade(hexNum, amt){
+    const r = (hexNum>>16)&0xff, g = (hexNum>>8)&0xff, b = hexNum&0xff;
+    const f = (v)=> Math.max(0, Math.min(255, Math.round(v + (amt>0?255-v:v)*amt)));
+    return ((f(r))<<16) | (f(g)<<8) | f(b);
+  }
+
+  function basketTotal(){ return Object.values(basket).reduce((a,b)=>a+b,0); }
+
+  function buySeed(i){
+    const c=CATALOG[i];
+    if(c.owned) return;
+    if(basketTotal()<c.cost){ flash('Need '+c.cost+' produce to trade for '+c.name); return; }
+    // spend produce: take from the basket, cheapest-first by count
+    let need=c.cost;
+    for(const k of Object.keys(basket)){
+      while(need>0 && basket[k]>0){ basket[k]--; need--; }
+      if(basket[k]<=0) delete basket[k];
+    }
+    refreshBasket();
+    c.owned=true; selectedSeed=i;
+    flash('Traded for '+c.name+'!');
+    renderLibrary();
+  }
+
+  function buyBuilding(i){
+    const c=BUILDINGS[i];
+    if(c.owned) return;
+    if(basketTotal()<c.cost){ flash('Need '+c.cost+' produce to build a '+c.name); return; }
+    let need=c.cost;
+    for(const k of Object.keys(basket)){
+      while(need>0 && basket[k]>0){ basket[k]--; need--; }
+      if(basket[k]<=0) delete basket[k];
+    }
+    refreshBasket();
+    c.owned = true;
+    placingBuilding = true;
+    selectedBuild = i;
+    buildingRotation = 0;
+    flash('Traded for '+c.name+'!');
+    renderLibrary();
+    refreshPreviewGhost();
+  }
+
+  // show/hide inventory based on standing on the plot (or forced open)
+  function setInventoryVisible(show){
+    if(show||invForceOpen){ invPanel.style.display='block'; invIcon.style.display='none'; }
+    else { invPanel.style.display='none'; invIcon.style.display='flex'; }
+  }
+  invIcon.onclick=()=>{ invForceOpen=true; renderLibrary(); setInventoryVisible(true); };
+  document.getElementById('invClose').onclick=()=>{ invForceOpen=false; setInventoryVisible(onPlot); };
+
+  // ---- builders: return a Group for a plant at a given stage index ----
+  function buildStage(entry, stageName){
+    const g = new THREE.Group();
+    const p = entry.parts;
+    const isTree = (entry.cat==='ftree'||entry.cat==='tree');
+
+    if(stageName==='seed' || stageName==='cutting'){
+      if(stageName==='cutting'){            // a little stick in the soil
+        vox(p.trunk, 0.12,0.6,0.12, 0,0.3,0, g);
+      } else {                              // a tiny mound
+        vox(0x6b5128, 0.4,0.18,0.4, 0,0.09,0, g);
+      }
+    }
+    else if(stageName==='sprout'){
+      vox(p.stem||p.top, 0.14,0.5,0.14, 0,0.25,0, g);
+      vox(p.stem||p.top, 0.35,0.12,0.12, 0,0.5,0, g);
+    }
+    else if(stageName==='leafy'){                  // herbs: bushy mid-growth
+      vox(p.stem, 0.14,0.55,0.14, 0,0.28,0, g);
+      vox(p.leaf, 0.45,0.22,0.45, 0,0.66,0, g);
+      vox(p.leaf, 0.28,0.16,0.28, 0.18,0.78,0.05, g);
+      vox(p.leaf, 0.28,0.16,0.28, -0.18,0.78,-0.05, g);
+    }
+    else if(stageName==='mature'){          // young tree, no fruit/flower
+      vox(p.trunk, 0.3,1.6,0.3, 0,0.8,0, g);
+      vox(p.leaf, 1.4,1.2,1.4, 0,1.9,0, g);
+    }
+    else if(stageName==='flower'){
+      if(isTree){
+        vox(p.trunk, 0.32,1.8,0.32, 0,0.9,0, g);
+        vox(p.leaf, 1.6,1.3,1.6, 0,2.1,0, g);
+        // blossom flecks
+        for(let i=0;i<4;i++){
+          const a=i/4*Math.PI*2;
+          vox(p.bloom, 0.3,0.3,0.3, Math.cos(a)*0.7,2.1,Math.sin(a)*0.7, g);
+        }
+      } else {
+        vox(p.stem, 0.14,0.7,0.14, 0,0.35,0, g);
+        vox(p.bloom, 0.5,0.4,0.5, 0,0.85,0, g);   // open bloom
+      }
+    }
+    else if(stageName==='swell' || stageName==='bulb'){   // root/allium pre-harvest
+      const top = p.top;
+      vox(top, 0.14,0.5,0.14, 0,0.25,0, g);
+      vox(top, 0.4,0.14,0.14, 0,0.5,0, g);
+      const body = entry.cat==='allium'? p.bulb : p.root;
+      vox(body, 0.3,0.25,0.3, 0,0.08,0, g);          // just peeking from soil
+    }
+    else if(stageName==='produce'){
+      if(isTree){
+        vox(p.trunk, 0.34,1.9,0.34, 0,0.95,0, g);
+        vox(p.leaf, 1.7,1.4,1.7, 0,2.2,0, g);
+        for(let i=0;i<5;i++){
+          const a=i/5*Math.PI*2;
+          vox(p.fruit, 0.28,0.28,0.28, Math.cos(a)*0.8,2.0,Math.sin(a)*0.8, g);
+        }
+      } else if(entry.cat==='herb'){
+        // ready-to-harvest herb: full leafy top with little bloom accents
+        vox(p.stem, 0.16,0.7,0.16, 0,0.35,0, g);
+        vox(p.leaf, 0.55,0.34,0.55, 0,0.75,0, g);
+        vox(p.leaf, 0.32,0.18,0.32, 0.20,0.88,0.08, g);
+        vox(p.leaf, 0.32,0.18,0.32, -0.20,0.88,-0.08, g);
+        vox(p.bloom,0.18,0.18,0.18, 0.28,1.05,0.10, g);
+        vox(p.bloom,0.16,0.16,0.16, -0.24,1.05,-0.10, g);
+      } else {
+        vox(p.stem, 0.16,0.7,0.16, 0,0.35,0, g);
+        vox(p.fruit, 0.55,0.55,0.55, 0,0.95,0, g);     // ripe fruit/veg
+      }
+    }
+    else if(stageName==='harvest'){          // root/allium pulled-ready
+      const top=p.top;
+      vox(top, 0.5,0.5,0.16, 0,0.5,0, g);    // bushy tops
+      const body = entry.cat==='allium'? p.bulb : p.root;
+      vox(body, 0.4,0.45,0.4, 0,0.18,0, g);  // bulged out of soil
+    }
+    return g;
+  }
+
+  /* ---------- Building builders (Phase 3) ----------
+     Each returns a voxel Group at its footprint center, already scaled so a
+     2x2 or 3x3 building fills its tiles. Rotation is applied separately by
+     the placement code. Fences are special: their mesh is rebuilt on the fly
+     based on which neighbours are also fences. */
+  function buildBuilding(b){
+    const g = new THREE.Group();
+    const W = b.foot;                                // footprint in tiles
+    const u = W * TILE * 0.45;                       // unit scale so it fills the square
+
+    if(b.name==='Stepping Stone'){
+      // 4 chunky stepping squares pushed out to the tile corners; bigger
+      // stones with much smaller border space and only a hairline gap between.
+      const offsets = [
+        [-0.41, -0.41], [ 0.41, -0.41],
+        [-0.41,  0.41], [ 0.41,  0.41],
+      ];
+      offsets.forEach(([px,pz])=>{
+        vox(0x5a5040, 0.74, 0.12, 0.74, px*u, 0.06,  pz*u, g);   // chunky base
+        vox(0x8a8474, 0.64, 0.08, 0.64, px*u, 0.15,  pz*u, g);   // top face
+        vox(0xa89c80, 0.56, 0.05, 0.56, px*u, 0.19,  pz*u, g);   // highlight
+      });
+    }
+    else if(b.name==='Stone Lantern'){
+      vox(0x5a4a3a, u*0.6, 0.25, u*0.6, 0, 0.125, 0, g);   // base stone
+      vox(0x9a8a6a, u*0.3, 0.7,  u*0.3, 0, 0.6,   0, g);   // post
+      vox(0xc8a060, u*0.55,0.4,  u*0.55,0, 1.15,  0, g);   // glowing box
+      vox(0x6a5a4a, u*0.7, 0.1,  u*0.7, 0, 1.4,   0, g);   // roof lip
+      vox(0x4a3a2a, u*0.25,0.15, u*0.25,0, 1.55,  0, g);   // finial
+    }
+    else if(b.name==='Mushroom Ring'){
+      const stem=0xc89070, cap=0xf0d0a0;
+      for(let i=0;i<5;i++){
+        const a=i/5*Math.PI*2 + Math.PI/2;
+        const r=u*0.45;
+        vox(stem, u*0.1, 0.25, u*0.1, Math.cos(a)*r, 0.125, Math.sin(a)*r, g);
+        vox(cap,  u*0.22,0.10, u*0.22,Math.cos(a)*r, 0.30,  Math.sin(a)*r, g);
+      }
+      vox(0x4f7a3a, u*0.5, 0.06, u*0.5, 0, 0.03, 0, g);   // grass tuft
+    }
+    else if(b.name==='Bird Bath'){
+      vox(0xa8b8c0, u*0.7, 0.2,  u*0.7, 0, 0.10, 0, g);    // base
+      vox(0x8a9aa0, u*0.25,0.6,  u*0.25,0, 0.50, 0, g);    // pillar
+      vox(0xa8b8c0, u*0.55,0.15, u*0.55,0, 0.88, 0, g);    // bowl
+      vox(0x4a7a9a, u*0.42,0.05, u*0.42,0, 0.93, 0, g);    // water
+    }
+    else if(b.name==='Garden Bench'){
+      vox(0x5a3a1a, u*1.7, 0.15, u*0.7,  0, 0.55, 0, g);   // seat
+      vox(0x3a2510, u*0.15,0.5,  u*0.7, -u*0.78, 0.20, 0, g); // left leg
+      vox(0x3a2510, u*0.15,0.5,  u*0.7,  u*0.78, 0.20, 0, g); // right leg
+      vox(0x5a3a1a, u*1.7, 0.55, u*0.1,  0, 0.92, -u*0.30, g); // backrest
+    }
+    else if(b.name==='Pagoda'){
+      vox(0x5a4030, u*1.7, 0.25, u*1.7, 0, 0.125, 0, g);   // stone base
+      // 4 corner pillars
+      [[-0.65,-0.65],[0.65,-0.65],[-0.65,0.65],[0.65,0.65]].forEach(([cx,cz])=>{
+        vox(0x8b3a2a, 0.22, 1.6, 0.22, cx*u, 1.05, cz*u, g);
+      });
+      vox(0x2a1a0a, u*1.95, 0.18, u*1.95, 0, 1.95, 0, g);  // 1st floor roof
+      vox(0x8b3a2a, u*1.1,  1.2,  u*1.1,  0, 2.65, 0, g);  // 2nd story
+      vox(0x2a1a0a, u*1.35, 0.15, u*1.35, 0, 3.35, 0, g);  // 2nd floor roof
+      vox(0xd9b25a, 0.18,    0.55, 0.18,    0, 3.72, 0, g);  // gold spire
+    }
+    else if(b.name==='Koi Pond'){
+      vox(0x4a4a4a, u*1.7, 0.15, u*1.7, 0, 0.075, 0, g);   // outer rim
+      vox(0x5a5a5a, u*1.5, 0.18, u*1.5, 0, 0.24,  0, g);   // inner rim
+      vox(0x4a8aa8, u*1.35,0.06, u*1.35,0, 0.32,  0, g);   // water
+      // lily pads + a flower
+      vox(0x3a8a3a, 0.45, 0.04, 0.45, -0.7*u, 0.37, 0.5*u, g);
+      vox(0x3a8a3a, 0.40, 0.04, 0.40,  0.6*u, 0.37,-0.5*u, g);
+      vox(0xe8d0d0, 0.18, 0.18, 0.18, -0.7*u, 0.46, 0.5*u, g);
+      // little koi hints (warm orange pixels just under the water)
+      vox(0xe08030, 0.12, 0.04, 0.18, 0.3*u,  0.34, 0.2*u, g);
+      vox(0xe08030, 0.12, 0.04, 0.18, -0.2*u, 0.34,-0.3*u, g);
+    }
+    else if(b.name==='Raised Bed'){
+      // Non-square footprint. buildBuilding is called with the CURRENT rotation
+      // (buildingRotation for the preview, or the saved quarter-turn for the
+      // placed object), so the W/H we pass already match the on-tile footprint.
+      // No further mesh rotation is applied.
+      const W = b.footW ?? b.foot;
+      const H = b.footH ?? b.foot;
+      const rot = (b._placementRot|0);
+      const wT = (rot%2===0) ? W : H;            // tile cols occupied after rotation
+      const hT = (rot%2===0) ? H : W;            // tile rows
+      const wu = wT * TILE;                      // world-unit width
+      const hu = hT * TILE;                      // world-unit depth
+      const wall = 0.25, wallH = 0.385;   // ~30% shorter than the original 0.55
+      const soilDepth = 0.245;            // ~30% shorter than 0.35
+      const postH = 0.126;                // ~30% shorter than 0.18
+      // cobalt blue wooden frame, 4 sides
+      vox(0x6cae9d, wu,           wallH, wall,    0,         wallH/2,  hu/2 - wall/2, g); // N
+      vox(0x6cae9d, wu,           wallH, wall,    0,         wallH/2, -hu/2 + wall/2, g); // S
+      vox(0x6cae9d, wall,         wallH, hu-2*wall,  wu/2 - wall/2, wallH/2, 0, g); // E
+      vox(0x6cae9d, wall,         wallH, hu-2*wall, -wu/2 + wall/2, wallH/2, 0, g); // W
+      // soil sitting on top of the frame
+      const soilW = wu - 2*wall - 0.1;
+      const soilH = hu - 2*wall - 0.1;
+      vox(0x3a2a18, soilW, soilDepth, soilH, 0, wallH + soilDepth/2, 0, g);
+      // grid lines dividing the soil into its actual tile cells (wT x hT),
+      // so a 2x3 bed reads as six 1x1 planting sections.
+      const soilTop = wallH + soilDepth;
+      const beam = 0.06, beamY = soilTop + 0.025, beamCol = 0x8fc9b9;
+      // internal + border lines parallel to z (vertical), at each tile column boundary
+      for(let i=0; i<=wT; i++){
+        const x = -wu/2 + i*TILE;
+        vox(beamCol, beam, 0.05, soilH, x, beamY, 0, g);
+      }
+      // internal + border lines parallel to x (horizontal), at each tile row boundary
+      for(let j=0; j<=hT; j++){
+        const z = -hu/2 + j*TILE;
+        vox(beamCol, soilW, 0.05, beam, 0, beamY, z, g);
+      }
+      // four corner posts sticking up (darker cobalt)
+      [[-1,-1],[1,-1],[-1,1],[1,1]].forEach(([sx,sz])=>{
+        vox(0x4f8f7e, 0.10, postH, 0.10, sx*(wu/2 - wall/2), soilTop + postH/2, sz*(hu/2 - wall/2), g);
+      });
+    }
+    return g;
+  }
+
+  /* ---------- Bed grid (Phase 4) ----------
+     Draws a bright cobalt grid on top of the soil matching the bed's
+     tile layout. Unlike THREE.GridHelper this is non-square, so a 2x3 bed
+     shows six distinct 1x1 sections and the user can clearly see where
+     each herb is going. */
+  function makeBedGrid(wT, hT){
+    const g = new THREE.Group();
+    const w = wT * TILE;
+    const h = hT * TILE;
+    const mat = new THREE.LineBasicMaterial({ color: 0x88aae0, transparent:true, opacity:0.85 });
+    // Vertical lines (parallel to z) at intervals of TILE
+    const vPts = [];
+    for(let i = 0; i <= wT; i++){
+      const x = -w/2 + i * TILE;
+      vPts.push(x, 0, -h/2,  x, 0, h/2);
+    }
+    const vGeom = new THREE.BufferGeometry();
+    vGeom.setAttribute('position', new THREE.Float32BufferAttribute(vPts, 3));
+    g.add(new THREE.LineSegments(vGeom, mat));
+    // Horizontal lines (parallel to x)
+    const hPts = [];
+    for(let j = 0; j <= hT; j++){
+      const z = -h/2 + j * TILE;
+      hPts.push(-w/2, 0, z,  w/2, 0, z);
+    }
+    const hGeom = new THREE.BufferGeometry();
+    hGeom.setAttribute('position', new THREE.Float32BufferAttribute(hPts, 3));
+    g.add(new THREE.LineSegments(hGeom, mat));
+    return g;
+  }
+
+  /* ---------- Fence mesh: post + directional rails ----------
+     Each fence checks its 4 neighbours; a rail is drawn only where the
+     neighbour is also a fence. When you place a new fence, we rebuild THIS
+     fence and any fence neighbours so the whole connected run reads as one
+     continuous wall. */
+  function fenceConnectionsAt(col,row){
+    const conn = {n:false, s:false, e:false, w:false};
+    const check = (c,r) => {
+      const o = occupied[c+','+r];
+      return o && o.kind === 'fence';
+    };
+    if(check(col,row-1)) conn.n = true;
+    if(check(col,row+1)) conn.s = true;
+    if(check(col+1,row)) conn.e = true;
+    if(check(col-1,row)) conn.w = true;
+    return conn;
+  }
+
+  function buildFenceMesh(conn){
+    const g = new THREE.Group();
+    // central post (always)
+    vox(0x6a4a2a, 0.18, 1.1, 0.18, 0, 0.55, 0, g);
+    vox(0x8a6a3a, 0.10, 0.12, 0.22, 0, 1.05, 0, g);   // post cap
+    // rails — each spans half a tile toward the neighbour (TILE/2 = 1)
+    const HALF = TILE/2;
+    if(conn.n) vox(0x8a6a3a, 0.10, 0.7, HALF*0.95, 0, 0.75, -HALF*0.5, g);
+    if(conn.s) vox(0x8a6a3a, 0.10, 0.7, HALF*0.95, 0, 0.75,  HALF*0.5, g);
+    if(conn.e) vox(0x8a6a3a, HALF*0.95, 0.7, 0.10,  HALF*0.5, 0.75, 0, g);
+    if(conn.w) vox(0x8a6a3a, HALF*0.95, 0.7, 0.10, -HALF*0.5, 0.75, 0, g);
+    return g;
+  }
+
+  /* ---------- Isometric icon generator ----------
+     Render a representative stage of each plant once into a small offscreen
+     scene, snapshot it to a PNG data-URL, and cache it on the catalogue entry.
+     Reused in the library list AND as a hovering billboard over planted items. */
+  const iconRenderer = new THREE.WebGLRenderer({ antialias:true, alpha:true, preserveDrawingBuffer:true });
+  iconRenderer.setSize(96, 96);
+  iconRenderer.shadowMap.enabled = false;
+  iconRenderer.outputColorSpace = THREE.SRGBColorSpace;
+
+  function bestIconStage(entry){
+    // show the most recognizable stage: ripe produce / bloom / harvest
+    const seq = STAGES[entry.cat];
+    return seq[seq.length-1];          // final stage reads best as an icon
+  }
+
+  function generateIcon(entry){
+    const scene2 = new THREE.Scene();
+    const model = buildStage(entry, bestIconStage(entry));
+    // center the model roughly
+    const box = new THREE.Box3().setFromObject(model);
+    const c = box.getCenter(new THREE.Vector3());
+    model.position.sub(new THREE.Vector3(c.x, box.min.y, c.z)); // sit on floor, centered
+    scene2.add(model);
+
+    // soft lighting just for the icon
+    scene2.add(new THREE.HemisphereLight(0xffffff, 0x444433, 1.1));
+    const d = new THREE.DirectionalLight(0xffffff, 1.2); d.position.set(3,5,2); scene2.add(d);
+
+    // isometric ortho camera framing the model
+    const size = Math.max(box.getSize(new THREE.Vector3()).length(), 1.2);
+    const cam = new THREE.OrthographicCamera(-size/2,size/2,size/2,-size/2,0.1,50);
+    const iso = Math.atan(1/Math.SQRT2);
+    cam.position.set(Math.sin(Math.PI/4)*8, Math.sin(iso)*8, Math.cos(Math.PI/4)*8);
+    cam.lookAt(0, size*0.28, 0);
+    cam.zoom = 1.25; cam.updateProjectionMatrix();
+
+    iconRenderer.render(scene2, cam);
+    const url = iconRenderer.domElement.toDataURL('image/png');
+    // dispose the temporary model meshes' materials (geometry is shared BOX)
+    model.traverse(o=>{ if(o.material) o.material.dispose(); });
+    return url;
+  }
+
+  function generateAllIcons(){
+    CATALOG.forEach(c=>{ c.icon = generateIcon(c); });
+  }
+
+  /* ---------- Building icon generator ----------
+     Same idea as generateIcon, but builds the building once with no rotation
+     (so the swatch looks identical regardless of in-game rotation). */
+  function generateBuildingIcon(entry){
+    const scene2 = new THREE.Scene();
+    entry._placementRot = 0;
+    const model = buildBuilding(entry);
+    const box = new THREE.Box3().setFromObject(model);
+    const c = box.getCenter(new THREE.Vector3());
+    model.position.sub(new THREE.Vector3(c.x, box.min.y, c.z));
+    scene2.add(model);
+    scene2.add(new THREE.HemisphereLight(0xffffff, 0x444433, 1.1));
+    const d = new THREE.DirectionalLight(0xffffff, 1.2); d.position.set(3,5,2); scene2.add(d);
+    const size = Math.max(box.getSize(new THREE.Vector3()).length(), 1.2);
+    const cam = new THREE.OrthographicCamera(-size/2,size/2,size/2,-size/2,0.1,50);
+    const iso = Math.atan(1/Math.SQRT2);
+    cam.position.set(Math.sin(Math.PI/4)*8, Math.sin(iso)*8, Math.cos(Math.PI/4)*8);
+    cam.lookAt(0, size*0.28, 0);
+    cam.zoom = 1.25; cam.updateProjectionMatrix();
+    iconRenderer.render(scene2, cam);
+    const url = iconRenderer.domElement.toDataURL('image/png');
+    model.traverse(o=>{ if(o.material) o.material.dispose(); });
+    return url;
+  }
+
+  function generateAllBuildingIcons(){
+    BUILDINGS.forEach(b=>{ b.icon = generateBuildingIcon(b); });
+  }
+
+  // gold ring shown when a plant is harvest-ready (scales with footprint)
+  function makeRing(scale=1){
+    const ring = new THREE.Mesh(
+      new THREE.TorusGeometry(0.9*scale,0.06*scale,4,16),
+      new THREE.MeshBasicMaterial({color:0xd9b25a})
+    );
+    ring.rotation.x = Math.PI/2; ring.position.y = 0.06;
+    return ring;
+  }
+
+  // ---------- Tile + footprint helpers (shared by plants AND future buildings) ----------
+  // Convert a world position to the (col,row) of the tile under it. May be off-plot.
+  function colRowAt(x,z){
+    const half=PLOT/2;
+    return { col: Math.floor((x+half)/TILE), row: Math.floor((z+half)/TILE) };
+  }
+  function inPlot(col,row){ return col>=0 && col<TILES && row>=0 && row<TILES; }
+  // Plantable = the central plot OR any tile the player has dug up. Anything
+  // outside this is grass (or trees/rocks) and you can't plant on it.
+  function isPlantable(col,row){
+    if(col<-digBounds||col>digBounds||row<-digBounds||row>digBounds) return false;
+    return inPlot(col,row) || digTiles.has(col+','+row);
+  }
+
+  // Center world coords of a footprint whose base (min corner) is (col,row), size w x h tiles.
+  function footprintCenter(col,row,w,h){
+    const half=PLOT/2;
+    return {
+      cx: -half + (col + w/2)*TILE,
+      cz: -half + (row + h/2)*TILE
+    };
+  }
+
+  // List the tile keys covered by a footprint. Returns null if any tile is off-plot.
+  function footprintTiles(col,row,w,h){
+    const keys=[];
+    for(let c=col;c<col+w;c++) for(let r=row;r<row+h;r++){
+      if(!inPlot(c,r)) return null;
+      keys.push(c+','+r);
+    }
+    return keys;
+  }
+  function areaFree(keys){
+    if(!keys) return false;
+    for(const k of keys){
+      if(occupied[k]) return false;
+      for(const pl of plants){ if(pl.keys.includes(k)) return false; }
+    }
+    return true;
+  }
+  function fillArea(keys,obj){ keys.forEach(k=>occupied[k]=obj); lastPreviewKey=''; }
+  function clearArea(keys){ keys.forEach(k=>delete occupied[k]); lastPreviewKey=''; }
+
+  // Find the best base tile for a w x h footprint near a world position.
+  // For multi-tile pieces we shift the base so the footprint stays on-plot and
+  // contains the player's tile when possible.
+  function placementAt(x,z,w,h){
+    const {col,row}=colRowAt(x,z);
+    if(!isPlantable(col,row)) return null;
+    // Candidate base tile that contains the player. The bounds reach out to
+    // +/- digBounds (the grass field) so footprints can sit on dig tiles OR
+    // the central plot.
+    const minC = -digBounds, maxC = digBounds - w;
+    const minR = -digBounds, maxR = digBounds - h;
+    let baseC = Math.min(Math.max(col - (w>1?Math.floor((w-1)/2):0), minC), maxC);
+    let baseR = Math.min(Math.max(row - (h>1?Math.floor((h-1)/2):0), minR), maxR);
+    const keys = footprintTiles(baseC,baseR,w,h);
+    if(!keys) return null;
+    // Every tile of the footprint must be plantable
+    for(const k of keys){
+      const [c,r] = k.split(',').map(Number);
+      if(!isPlantable(c,r)) return null;
+    }
+    const {cx,cz}=footprintCenter(baseC,baseR,w,h);
+    return { col:baseC, row:baseR, w, h, keys, cx, cz, key:baseC+','+baseR };
+  }
+
+  // Effective footprint takes buildingRotation into account so non-square
+  // buildings (e.g. the 2x3 raised bed) can be rotated 90° and occupy 3x2
+  // tiles instead. Square footprints are unaffected.
+  function effectiveFootprint(b){
+    const baseW = b.footW ?? b.foot;
+    const baseH = b.footH ?? b.foot;
+    if(!placingBuilding) return {w: baseW, h: baseH};
+    const rot = buildingRotation % 2;
+    return rot === 0 ? {w: baseW, h: baseH} : {w: baseH, h: baseW};
+  }
+
+  /* ---------- Live footprint preview ----------
+     A flat highlight that follows the player, sized to the SELECTED seed's
+     footprint, recoloured green (free) / red (blocked). Updates in real time
+     as you scroll the library, and hides when you step off the plot. */
+  const previewMat = new THREE.MeshBasicMaterial({
+    color:0x7ddf6a, transparent:true, opacity:0.28, depthWrite:false
+  });
+  const previewEdgeMat = new THREE.LineBasicMaterial({ color:0x7ddf6a, transparent:true, opacity:0.9 });
+  const previewFill = new THREE.Mesh(new THREE.PlaneGeometry(1,1), previewMat);
+  previewFill.rotation.x = -Math.PI/2;
+  const previewEdges = new THREE.LineSegments(
+    new THREE.EdgesGeometry(new THREE.PlaneGeometry(1,1)), previewEdgeMat
+  );
+  previewEdges.rotation.x = -Math.PI/2;
+  // 3D ghost that previews the building shape (with rotation)
+  const previewModel = new THREE.Group();
+  previewModel.position.y = 0;
+  const preview = new THREE.Group();
+  preview.add(previewFill); preview.add(previewEdges); preview.add(previewModel);
+  preview.position.y = 0.34; preview.visible = false;
+  world.add(preview);
+
+  // ---- Build / refresh the 3D ghost whenever selection or rotation changes ----
+  function clearPreviewModel(){
+    while(previewModel.children.length){
+      const c = previewModel.children[0];
+      previewModel.remove(c);
+      c.traverse(o=>{
+        if(o.material){
+          if(Array.isArray(o.material)) o.material.forEach(m=>m.dispose());
+          else o.material.dispose();
+        }
+      });
+    }
+  }
+  // Leave building-placement mode and clear the floating ghost. Called after
+  // any non-build action (harvest, dig, pick up) so a stale ghost doesn't linger.
+  function exitBuildMode(){
+    if(!placingBuilding) return;
+    placingBuilding = false;
+    refreshPreviewGhost();   // clears the ghost model since placingBuilding is now false
+    lastPreviewKey = '';     // force the footprint highlight to refresh too
+    renderLibrary();         // un-highlight the selected building row
+  }
+
+  function refreshPreviewGhost(){
+    clearPreviewModel();
+    if(!placingBuilding) return;
+    const b = BUILDINGS[selectedBuild];
+    let mesh;
+    if(b.kind==='fence'){
+      // preview shows a single fence post — connections happen on placement
+      mesh = buildFenceMesh({n:false,s:false,e:false,w:false});
+    } else {
+      // Pass rotation so the bed can size itself correctly. Other buildings
+      // ignore _placementRot; the visual rotation is applied below.
+      b._placementRot = buildingRotation;
+      mesh = buildBuilding(b);
+    }
+    // semi-transparent so it doesn't completely hide the highlight plane
+    mesh.traverse(o=>{
+      if(o.material){
+        const m = Array.isArray(o.material) ? o.material[0] : o.material;
+        const nm = m.clone();
+        nm.transparent = true;
+        nm.opacity = 0.35;
+        nm.depthWrite = false;
+        o.material = nm;
+      }
+    });
+    // For square buildings the rotation is purely visual. For the raised bed
+    // rotation is already baked into the mesh, so skip the extra Y rotation.
+    if(b.name !== 'Raised Bed'){
+      mesh.rotation.y = buildingRotation * Math.PI/2;
+    }
+    previewModel.add(mesh);
+  }
+
+  const COL_FREE = new THREE.Color(0x7ddf6a);
+  const COL_BLOCK = new THREE.Color(0xe0584f);
+
+  function updateFootprintPreview(){
+    if(!onPlot){ preview.visible=false; return; }
+    const entry = placingBuilding ? BUILDINGS[selectedBuild] : CATALOG[selectedSeed];
+    const fp = effectiveFootprint(entry);
+    const t = placementAt(player.position.x, player.position.z, fp.w, fp.h);
+    if(!t){ preview.visible=false; return; }
+    preview.visible = true;
+    const free = areaFree(t.keys);
+    const col = free ? COL_FREE : COL_BLOCK;
+    previewMat.color.copy(col); previewEdgeMat.color.copy(col);
+    // size the highlight to the footprint (slightly inset so edges read cleanly)
+    const sx = t.w*TILE - 0.12, sz = t.h*TILE - 0.12;
+    previewFill.scale.set(sx, sz, 1);
+    previewEdges.scale.set(sx, sz, 1);
+    preview.position.set(t.cx, 0.34, t.cz);
+  }
+
+  /* ---------- Tap a plant to identify it ----------
+     Raycast from the iso camera; if a planted item is hit, show its isometric
+     icon as a billboard hovering above it for a few seconds. */
+  const raycaster = new THREE.Raycaster();
+  const pointer = new THREE.Vector2();
+
+  // the hovering identify icon (a camera-facing sprite)
+  let hoverSprite = null, hoverPlant = null, hoverTimer = 0;
+  const iconTexCache = {};
+  function iconTexture(entry){
+    if(!iconTexCache[entry.name]) iconTexCache[entry.name] = new THREE.TextureLoader().load(entry.icon);
+    return iconTexCache[entry.name];
+  }
+  function showHoverIcon(plant){
+    if(!plant.entry.icon) return;
+    const tex = iconTexture(plant.entry);
+    if(!hoverSprite){
+      hoverSprite = new THREE.Sprite(new THREE.SpriteMaterial({ map:tex, transparent:true }));
+      hoverSprite.scale.set(1.6,1.6,1);
+      scene.add(hoverSprite);
+    } else {
+      hoverSprite.material.map = tex;
+      hoverSprite.material.needsUpdate = true;
+      hoverSprite.visible = true;
+    }
+    hoverPlant = plant; hoverTimer = 3.0;
+    flash(plant.entry.name + (plant.ripe ? ' · ready to harvest' : ' · growing'));
+  }
+
+  function onTap(clientX, clientY){
+    pointer.x = (clientX/innerWidth)*2 - 1;
+    pointer.y = -(clientY/innerHeight)*2 + 1;
+    raycaster.setFromCamera(pointer, camera);
+    // test against all planted groups
+    const meshes = [];
+    plants.forEach(pl=> pl.group.traverse(o=>{ if(o.isMesh){ o.userData.plant = pl; meshes.push(o); } }));
+    const hits = raycaster.intersectObjects(meshes, false);
+    if(hits.length){ showHoverIcon(hits[0].object.userData.plant); }
+  }
+  renderer.domElement.addEventListener('click', e=> onTap(e.clientX, e.clientY));
+
+  function plantHere(){
+    const entry = CATALOG[selectedSeed];
+    if(!entry.owned){ flash('You don\u2019t own '+entry.name+' yet'); return; }
+    const w=entry.foot, h=entry.foot;
+    const t = placementAt(player.position.x, player.position.z, w, h);
+    if(!t){ flash('Need a clear '+w+'×'+h+' space on the soil'); return; }
+
+    // ---- Zone + occupancy check (Phase 3) ----
+    // Beds occupy their tiles in `occupied`, so the strict areaFree() would
+    // reject herbs on a bed. We walk the footprint and apply the rules
+    // per-tile: bed tiles are FREE for herbs only; everything else refuses
+    // both other plants AND non-bed ground objects.
+    const isHerb = entry.cat === 'herb';
+    let onBed = false;
+    for(const k of t.keys){
+      const o = occupied[k];
+      const kOnBed = o && o.kind === 'bed';
+      if(kOnBed) onBed = true;
+      // any plant already there (regular soil or bed)?
+      for(const pl of plants){
+        if(pl.keys.includes(k)){
+          flash(w>1 ? 'That '+w+'×'+h+' space is blocked' : 'That tile is taken');
+          return;
+        }
+      }
+      // non-bed ground object (fence, building, other bed only via herb rule below)?
+      if(o && !kOnBed){
+        flash(w>1 ? 'That '+w+'×'+h+' space is blocked' : 'That tile is taken');
+        return;
+      }
+      // zone rule
+      if(isHerb && !kOnBed){
+        flash(entry.name + ' only grows in a raised bed');
+        return;
+      }
+      if(!isHerb && kOnBed){
+        flash('Only herbs grow in a raised bed');
+        return;
+      }
+    }
+
+    const seq = STAGES[entry.cat];
+    const plant = {
+      kind: 'plant',
+      entry, seq, stage:0, t, keys:t.keys,
+      onBed,
+      grow:0, perStage: 2.2 + Math.random()*1.4,  // arcade-fast: seconds per stage
+      group:new THREE.Group(), mesh:null, ring:null, ripe:false
+    };
+    // raised bed plants sit at the top of the soil (soil top ~0.93 with shorter bed)
+    plant.group.position.set(t.cx, onBed ? 0.88 : 0.3, t.cz);
+    // a 2x2 footprint plant (trees) is scaled up to fill its larger square
+    plant.footScale = entry.foot>1 ? 1.7 : 1.0;
+    world.add(plant.group);
+    setPlantStage(plant, 0);
+    if(!onBed) fillArea(t.keys, plant);   // on a bed, the bed already owns the tile
+    plants.push(plant);
+    flash('Planted '+entry.name);
+  }
+
+  // ---------- Build / place a building or fence (Phase 3) ----------
+  const placed = [];   // all placed objects (plants live in `plants` too, but `placed` covers both)
+
+  function buildHere(){
+    const b = BUILDINGS[selectedBuild];
+    if(!b.owned){ flash('You don\u2019t own '+b.name+' yet'); return; }
+    const fp = effectiveFootprint(b);
+    const t = placementAt(player.position.x, player.position.z, fp.w, fp.h);
+    if(!t){ flash('Need a clear '+fp.w+'×'+fp.h+' space on the soil'); return; }
+    if(!areaFree(t.keys)){
+      flash(fp.w>1 ? 'That '+fp.w+'×'+fp.h+' space is blocked' : 'That tile is taken');
+      return;
+    }
+
+    const obj = {
+      kind: b.kind,                 // 'decor' | 'build' | 'fence' | 'bed'
+      entry: b, t, keys:t.keys,
+      group: new THREE.Group(),
+      mesh:  null,
+      rotY:  buildingRotation * Math.PI/2,
+    };
+    obj.group.position.set(t.cx, 0.3, t.cz);
+    world.add(obj.group);
+
+    if(b.kind==='fence'){
+      obj.mesh = buildFenceMesh(fenceConnectionsAt(t.col, t.row));
+      obj.group.add(obj.mesh);
+      obj.group.rotation.y = obj.rotY;
+      fillArea(t.keys, obj);
+      placed.push(obj);
+      // refresh this fence and all fence neighbours so the whole run re-links
+      const touched = new Set();
+      touched.add(t.col+','+t.row);
+      [[t.col,t.row-1],[t.col,t.row+1],[t.col+1,t.row],[t.col-1,t.row]].forEach(([c,r])=>{
+        const k = c+','+r;
+        if(occupied[k] && occupied[k].kind==='fence') touched.add(k);
+      });
+      touched.forEach(k=>{
+        const o = occupied[k];
+        if(!o) return;
+        if(o.mesh){ o.group.remove(o.mesh); }
+        const [c,r] = k.split(',').map(Number);
+        o.mesh = buildFenceMesh(fenceConnectionsAt(c,r));
+        o.group.add(o.mesh);
+      });
+      flash('Fence placed');
+    } else if(b.kind==='bed'){
+      // Bed: rotation is baked into the mesh (b._placementRot), so do NOT
+      // additionally rotate the group. Register the bed on every tile it covers.
+      // The bed mesh already draws its own tile grid, so no separate overlay.
+      b._placementRot = buildingRotation;
+      obj.mesh = buildBuilding(b);
+      obj.group.add(obj.mesh);
+      fillArea(t.keys, obj);
+      placed.push(obj);
+      t.keys.forEach(k => { bedTiles.add(k); bedBed[k] = obj; });
+      flash('Built a raised bed ('+fp.w+'×'+fp.h+')');
+    } else {
+      obj.mesh = buildBuilding(b);
+      obj.group.add(obj.mesh);
+      obj.group.rotation.y = obj.rotY;
+      fillArea(t.keys, obj);
+      placed.push(obj);
+      flash(b.foot>1 ? 'Built '+b.name : 'Placed '+b.name);
+    }
+  }
+
+  // Pick up a placed building/fence by standing on its tile and pressing F.
+  // Plants (kind!=='building') are NOT affected here — harvestHere handles those.
+  function removeHere(){
+    const {col,row} = colRowAt(player.position.x, player.position.z);
+    if(!inPlot(col,row)) return false;
+    const o = occupied[col+','+row];
+    if(!o || o.entry===undefined || (o.kind!=='decor' && o.kind!=='build' && o.kind!=='fence' && o.kind!=='bed')) return false;
+    // remove the object + free its tiles, then re-link any fence neighbours
+    world.remove(o.group);
+    clearArea(o.keys);
+    const idx = placed.indexOf(o);
+    if(idx>=0) placed.splice(idx,1);
+    // for fences: rebuild every fence neighbour so the run re-links without this tile
+    if(o.kind==='fence'){
+      const [c,r] = [col,row];
+      [[c,r-1],[c,r+1],[c+1,r],[c-1,r]].forEach(([nc,nr])=>{
+        if(!inPlot(nc,nr)) return;
+        const k = nc+','+nr;
+        const no = occupied[k];
+        if(!no || no.kind!=='fence') return;
+        if(no.mesh){ no.group.remove(no.mesh); }
+        no.mesh = buildFenceMesh(fenceConnectionsAt(nc,nr));
+        no.group.add(no.mesh);
+      });
+    }
+    // for beds: unregister bed tiles + any herbs sitting on the bed
+    if(o.kind==='bed'){
+      o.keys.forEach(k => { bedTiles.delete(k); delete bedBed[k]; });
+      if(o.grid) world.remove(o.grid);
+      const onBed = plants.filter(p => p.onBed && p.keys.some(k => o.keys.includes(k)));
+      for(const p of onBed){
+        world.remove(p.group);
+        clearArea(p.keys);   // safe: plant.onBed means it never wrote to occupied
+        const pi = plants.indexOf(p);
+        if(pi>=0) plants.splice(pi,1);
+        flash(p.entry.name + ' lifted with the bed');
+      }
+    }
+    flash('Picked up '+o.entry.name);
+    exitBuildMode();   // clear any lingering build ghost
+    return true;
+  }
+
+  function setPlantStage(plant, idx){
+    plant.stage = idx;
+    if(plant.mesh){ plant.group.remove(plant.mesh); }
+    const stageName = plant.seq[idx];
+    plant.mesh = buildStage(plant.entry, stageName);
+    // pop-in: start small, grow toward the plant's full (footprint-aware) scale
+    plant.mesh.scale.setScalar(0.6*plant.footScale);
+    plant.group.add(plant.mesh);
+    const last = idx===plant.seq.length-1;
+    plant.ripe = last;
+    if(last && !plant.ring){
+      plant.ring = makeRing(plant.footScale);
+      plant.group.add(plant.ring);
+    }
+  }
+
+  function harvestHere(){
+    const {col,row}=colRowAt(player.position.x, player.position.z);
+    if(!isPlantable(col,row)){ flash('Nothing here to harvest'); return; }
+    const key = col+','+row;
+    // Plant on regular soil lives in occupied; plant on a bed lives only in plants[].
+    let plant = occupied[key];
+    if(!plant || plant.kind !== 'plant'){
+      plant = plants.find(p => p.keys.includes(key));
+    }
+    if(!plant){ flash('Nothing here to harvest'); return; }
+    if(!plant.ripe){ flash(plant.entry.name+' is still growing'); return; }
+    // yield: produce item named after the plant (ftree yields the fruit, not the tree)
+    const yieldName = plant.entry.cat === 'ftree'
+      ? plant.entry.name.replace(' Tree','')
+      : plant.entry.name;
+    addToBasket(yieldName);
+    totalHarvested++;
+    flash('Harvested '+plant.entry.name);
+    // remove plant and free ALL tiles it covered
+    world.remove(plant.group);
+    if(!plant.onBed) clearArea(plant.keys);   // bed plants never wrote to occupied
+    plants.splice(plants.indexOf(plant),1);
+    exitBuildMode();   // any non-build action clears a lingering ghost
+    renderLibrary();   // a harvest may reveal a milestone seed / afford a buy
+  }
+
+  // ---------- Dig up a grass tile (Phase 4) ----------
+  // B key on grass turns it into plantable soil. Each dig adds a soil patch
+  // mesh, registers the tile in digTiles, and the placement system accepts it.
+  function digHere(){
+    const {col,row} = colRowAt(player.position.x, player.position.z);
+    const key = col+','+row;
+    if(inPlot(col,row)){ flash('Already plantable — it\'s the plot'); return; }
+    if(digTiles.has(key)){ flash('Already dug here'); return; }
+    if(occupied[key]){ flash('Something is in the way'); return; }
+    if(col < -digBounds || col > digBounds || row < -digBounds || row > digBounds){
+      flash('Too close to the world edge'); return;
+    }
+    // Build a soil patch that matches the plot's soil appearance
+    const half = PLOT/2;
+    const cx = -half + (col + 0.5) * TILE;
+    const cz = -half + (row + 0.5) * TILE;
+    const soil = new THREE.Mesh(
+      new THREE.BoxGeometry(TILE - 0.06, 0.5, TILE - 0.06),
+      vmat(0x5a4329)
+    );
+    soil.position.set(cx, 0.05, cz);
+    soil.receiveShadow = true;
+    world.add(soil);
+    digMeshes[key] = soil;
+    digTiles.add(key);
+    exitBuildMode();   // clear any lingering build ghost
+    flash('Dug a soil patch ('+(col)+','+(row)+')');
+  }
+
+  // ---------- Basket / inventory ----------
+  const basket = {};
+  function refreshBasket(){
+    const list = Object.entries(basket).map(([k,v])=>k+' ×'+v).join('<br>');
+    document.getElementById('basketList').innerHTML = list||'empty';
+    // keep the trade panel buttons in sync if it's open
+    if(typeof tradeModal!=='undefined' && tradeModal && tradeModal.style.display==='flex') renderTradePanel();
+  }
+  function addToBasket(name){
+    basket[name] = (basket[name]||0)+1;
+    refreshBasket();
+  }
+
+  // ---------- Trade post (Phase 4) ----------
+  // Recipe-based trades: bring specific produce, get a rare seed or building.
+  // rewardKind: 'seed' or 'building'; rewardIdx is the index in that catalog.
+  // Note: Apple Tree is intentionally buildable from common produce so the
+  // player isn't gated behind already having apples. Cherry Tree then needs
+  // apples; Pagoda/Koi sit at the top of the progression.
+  const TRADES = [
+    { name:'Pumpkin Seed', needs:{Tomato:2, Carrot:1},              rewardKind:'seed',     rewardIdx:5,  hint:'hearty autumn vine' },
+    { name:'Lavender Seed', needs:{Marigold:3, Bluebell:2},          rewardKind:'seed',     rewardIdx:6,  hint:'fragrant purple bloom' },
+    { name:'Apple Tree',   needs:{Tomato:4, Carrot:2, Marigold:1},  rewardKind:'seed',     rewardIdx:7,  hint:'a small fruit tree' },
+    { name:'Cherry Tree',  needs:{Apple:3, Tomato:2},               rewardKind:'seed',     rewardIdx:8,  hint:'pink spring blossoms' },
+    { name:'Oak Sapling',  needs:{Carrot:4, Tomato:3, Basil:2},     rewardKind:'seed',     rewardIdx:9,  hint:'a slow, sturdy oak' },
+    { name:'Garden Bench', needs:{Tomato:3},                        rewardKind:'building', rewardIdx:6,  hint:'a weathered wooden bench' },
+    { name:'Pagoda',       needs:{Apple:5, Tomato:5, Carrot:3},     rewardKind:'building', rewardIdx:7,  hint:'a tall tiered pavilion' },
+    { name:'Koi Pond',     needs:{Apple:5, Cherry:3, Tomato:5},     rewardKind:'building', rewardIdx:8,  hint:'a sunken pool with koi' },
+  ];
+
+  function canAffordTrade(t){
+    for(const [item,qty] of Object.entries(t.needs)){
+      if((basket[item]||0) < qty) return false;
+    }
+    return true;
+  }
+  function describeMissing(t){
+    const miss = [];
+    for(const [item,qty] of Object.entries(t.needs)){
+      const have = basket[item]||0;
+      if(have < qty) miss.push((qty-have)+' '+item);
+    }
+    return miss.join(', ');
+  }
+
+  function doTrade(t){
+    if(!canAffordTrade(t)){ flash('Not enough produce'); return; }
+    for(const [item,qty] of Object.entries(t.needs)){
+      basket[item] -= qty;
+      if(basket[item] <= 0) delete basket[item];
+    }
+    refreshBasket();
+    if(t.rewardKind === 'seed'){
+      const c = CATALOG[t.rewardIdx];
+      c.owned = true; c.revealed = true;
+      flash('Traded for '+c.name+' seed');
+    } else {
+      const b = BUILDINGS[t.rewardIdx];
+      b.owned = true; b.revealed = true;
+      flash('Traded for '+b.name);
+    }
+    renderLibrary();
+    renderTradePanel();
+  }
+
+  // Look up the icon for a basket item name. Try exact match first (e.g.
+  // "Tomato"), then try + " Tree" (so "Apple" resolves to the Apple Tree icon).
+  function iconForItem(name){
+    let c = CATALOG.find(c => c.name === name);
+    if(c && c.icon) return c.icon;
+    c = CATALOG.find(c => c.name === name + ' Tree');
+    if(c && c.icon) return c.icon;
+    return null;
+  }
+
+  function makeIconBox(url, fallback, sizePx){
+    const el = document.createElement('div');
+    el.style.cssText = `width:${sizePx}px;height:${sizePx}px;flex:0 0 auto;border-radius:6px;border:1px solid rgba(217,178,90,0.4);background:rgba(0,0,0,0.28);background-size:contain;background-repeat:no-repeat;background-position:center;`;
+    if(url) el.style.backgroundImage = 'url(' + url + ')';
+    else if(fallback !== undefined) el.style.background = '#' + fallback.toString(16).padStart(6,'0');
+    return el;
+  }
+
+  function renderTradePanel(){
+    const list = document.getElementById('tradeList');
+    list.innerHTML = '';
+    TRADES.forEach(t=>{
+      const card = document.createElement('div');
+      card.style.cssText = 'padding:12px 14px;border-radius:8px;background:rgba(0,0,0,0.32);border:1px solid rgba(217,178,90,0.22);';
+
+      // --- Top row: reward on the LEFT, cost column on the RIGHT ---
+      const top = document.createElement('div');
+      top.style.cssText = 'display:flex;gap:16px;align-items:flex-start;justify-content:space-between;';
+
+      // Left side: reward icon + name + hint
+      const left = document.createElement('div');
+      left.style.cssText = 'flex:0 0 auto;display:flex;align-items:center;gap:11px;max-width:55%;';
+      const rewardObj = t.rewardKind === 'seed' ? CATALOG[t.rewardIdx] : BUILDINGS[t.rewardIdx];
+      const rIcon = makeIconBox(rewardObj.icon, rewardObj.swatch, 44);
+      left.appendChild(rIcon);
+      const titleWrap = document.createElement('div');
+      titleWrap.innerHTML =
+        '<div style="color:var(--gold-soft);font-size:13px;letter-spacing:1px;">'+t.name+'</div>'+
+        '<div style="color:var(--gold);opacity:.55;font-size:10px;letter-spacing:1px;margin-top:2px;">'+t.hint+'</div>';
+      left.appendChild(titleWrap);
+      top.appendChild(left);
+
+      // Right side: cost stacked in a vertical column
+      const right = document.createElement('div');
+      right.style.cssText = 'flex:0 0 auto;display:flex;flex-direction:column;gap:5px;align-items:flex-end;';
+      const costHead = document.createElement('div');
+      costHead.style.cssText = 'color:var(--gold);opacity:.55;font-size:9px;letter-spacing:2px;margin-bottom:2px;';
+      costHead.textContent = 'COST';
+      right.appendChild(costHead);
+      Object.entries(t.needs).forEach(([item,qty])=>{
+        const row = document.createElement('div');
+        row.style.cssText = 'display:flex;align-items:center;gap:7px;padding:2px 8px;border-radius:14px;background:rgba(217,178,90,0.08);border:1px solid rgba(217,178,90,0.18);';
+        const ic = makeIconBox(iconForItem(item), undefined, 18);
+        row.appendChild(ic);
+        const have = basket[item]||0;
+        const lbl = document.createElement('span');
+        const enough = have >= qty;
+        lbl.style.cssText = 'color:'+(enough?'var(--gold-soft)':'#8a7a55')+';font-size:11px;letter-spacing:1px;';
+        lbl.textContent = qty + ' \u00d7 ' + item + (enough ? '' : '  ('+have+')');
+        row.appendChild(lbl);
+        right.appendChild(row);
+      });
+      top.appendChild(right);
+
+      card.appendChild(top);
+
+      // --- Trade button (full width under the row) ---
+      const btn = document.createElement('div');
+      const ok = canAffordTrade(t);
+      btn.style.cssText = 'margin-top:10px;padding:7px 12px;display:block;text-align:center;border-radius:6px;font-size:11px;letter-spacing:2px;pointer-events:auto;'+
+        (ok
+          ? 'background:rgba(217,178,90,0.24);color:var(--gold-soft);border:1px solid rgba(217,178,90,0.55);cursor:pointer;'
+          : 'background:rgba(60,50,30,0.5);color:#8a7a55;border:1px solid rgba(217,178,90,0.18);cursor:not-allowed;');
+      btn.textContent = ok ? 'TRADE' : 'NEED ' + describeMissing(t);
+      if(ok) btn.onclick = ()=> doTrade(t);
+      card.appendChild(btn);
+
+      list.appendChild(card);
+    });
+  }
+
+  // modal open/close + T key toggle
+  const tradeModal = document.getElementById('tradeModal');
+  function setTradeOpen(open){
+    tradeModal.style.display = open ? 'flex' : 'none';
+    if(open) renderTradePanel();
+  }
+  document.getElementById('tradeBtn').onclick = ()=> setTradeOpen(true);
+  document.getElementById('tradeClose').onclick = ()=> setTradeOpen(false);
+  tradeModal.addEventListener('click', e=>{ if(e.target===tradeModal) setTradeOpen(false); });
+
+  // ---------- transient prompt text ----------
+  let promptTimer=0;
+  function flash(msg){
+    const el=document.getElementById('prompt');
+    el.textContent=msg; el.style.display='block'; promptTimer=2;
+  }
+
+  // keys for planting / building / harvesting / picking up
+  addEventListener('keydown',e=>{
+    if(e.code==='Space'){
+      e.preventDefault();
+      if(placingBuilding) buildHere(); else plantHere();
+    }
+    if(e.code==='KeyF'){
+      // F tries to pick up a building first; falls back to harvesting a plant
+      if(!removeHere()) harvestHere();
+    }
+  });
+
+  addEventListener('resize',()=>{setupOrtho();renderer.setSize(innerWidth,innerHeight);});
+
+  // ---------- Loop ----------
+  const clock=new THREE.Clock();
+  let walkPhase=0, camAngle=isoAngle;
+
+  // --- hoisted loop constants (avoid per-frame allocation) ---
+  const DAY_BG   = new THREE.Color(0x7db8e8);   // bright daytime blue sky
+  const NIGHT_BG = new THREE.Color(0x0a1430);   // deep blue night sky (not black)
+  const DAY_FOG  = new THREE.Color(0xb8d4e8);   // pale blue haze by day (matches sky)
+  const NIGHT_FOG= new THREE.Color(0x26344e);   // muted blue-grey night air — keeps scene readable
+  let lastPhaseLabel = '';        // only write the time HUD when it changes
+  const TMP_PROJ = new THREE.Vector3();   // reused for prompt projection
+
+  function tick(){
+    const dt=Math.min(clock.getDelta(),0.05);
+    const now=performance.now();   // cache once; reused by bob animations
+
+    // movement relative to current iso view angle
+    const speed=(keys['ShiftLeft']||keys['ShiftRight'])?10.5:6.0;
+    let mx=0,mz=0;
+    if(keys['KeyW'])mz-=1; if(keys['KeyS'])mz+=1;
+    if(keys['KeyA'])mx-=1; if(keys['KeyD'])mx+=1;
+    if(mx||mz){
+      const len=Math.hypot(mx,mz);mx/=len;mz/=len;
+      // build movement from the camera's on-screen axes:
+      //   forward = direction the camera looks (W goes up-screen)
+      //   right   = perpendicular (D goes screen-right)
+      const fwdX=-Math.sin(camAngle), fwdZ=-Math.cos(camAngle);
+      const rightX=Math.cos(camAngle), rightZ=-Math.sin(camAngle);
+      const dx = mx*rightX + (-mz)*fwdX;
+      const dz = mx*rightZ + (-mz)*fwdZ;
+      player.position.x+=dx*speed*dt; player.position.z+=dz*speed*dt;
+      const lim=26;
+      player.position.x=Math.max(-lim,Math.min(lim,player.position.x));
+      player.position.z=Math.max(-lim,Math.min(lim,player.position.z));
+      player.rotation.y=Math.atan2(dx,dz);
+      walkPhase+=dt*speed*1.6;
+      legL.rotation.x=Math.sin(walkPhase)*0.6;
+      legR.rotation.x=-Math.sin(walkPhase)*0.6;
+    } else { legL.rotation.x*=0.8; legR.rotation.x*=0.8; }
+
+    // --- inventory pops up when standing on the soil plot ---
+    const half=PLOT/2;
+    const nowOnPlot = Math.abs(player.position.x)<=half && Math.abs(player.position.z)<=half;
+    if(nowOnPlot!==onPlot){
+      onPlot=nowOnPlot;
+      if(onPlot) renderLibrary();
+      setInventoryVisible(onPlot);
+    }
+    // live footprint highlight follows the player while on the plot.
+    // Only recompute when something it depends on actually changed
+    // (player tile, selection, build/plant mode, or rotation).
+    const pcol = Math.floor((player.position.x + PLOT/2)/TILE);
+    const prow = Math.floor((player.position.z + PLOT/2)/TILE);
+    const previewKey = pcol+','+prow+'|'+(placingBuilding?'B'+selectedBuild:'P'+selectedSeed)+'|'+buildingRotation+'|'+(onPlot?1:0);
+    if(previewKey !== lastPreviewKey){
+      lastPreviewKey = previewKey;
+      updateFootprintPreview();
+    }
+
+    // smooth the 90° view rotations
+    camAngle+=(isoAngle-camAngle)*Math.min(1,dt*8);
+
+    // isometric camera: fixed pitch, orbiting yaw, orthographic
+    const dist=40, pitch=Math.atan(1/Math.SQRT2); // ~35.26° classic iso
+    const cx=player.position.x+Math.sin(camAngle)*Math.cos(pitch)*dist;
+    const cz=player.position.z+Math.cos(camAngle)*Math.cos(pitch)*dist;
+    const cy=Math.sin(pitch)*dist;
+    camera.position.set(cx,cy,cz);
+    camera.lookAt(player.position.x,1,player.position.z);
+
+    // ---------- Day/night cycle (Phase 4) ----------
+    // 2x slower than the original (was 0.01, now 0.005). Sun rises east,
+    // arcs across, sets west. Moon arcs the opposite way.
+    dayTime += dt * 0.005;
+    if(dayTime >= 1){ dayTime = 0; day++; document.getElementById('dayVal').textContent = day; }
+    const phaseLabel = phaseName(dayTime);
+    if(phaseLabel !== lastPhaseLabel){
+      document.getElementById('timeVal').textContent = phaseLabel;
+      lastPhaseLabel = phaseLabel;
+    }
+
+    const sunAngle  = (dayTime - 0.25) * Math.PI * 2;   // for the visible sun disc only
+    const moonAngle = (dayTime + 0.25) * Math.PI * 2;   // opposite cadence
+    const sunX = Math.cos(sunAngle),  sunY = Math.sin(sunAngle);
+    const moonX = Math.cos(moonAngle), moonY = Math.sin(moonAngle);
+    const sunFactor  = Math.max(0, sunY);               // 0 at/below horizon, 1 at noon
+    const moonFactor = Math.max(0, moonY);
+    // nightFactor drives ONLY the sky backdrop / stars — not the scene lighting.
+    const nightFactor = 1 - sunFactor;
+
+    // --- Scene lighting stays constant so the grove is always clearly visible. ---
+    // The key light is fixed high overhead (weather still modulates its strength),
+    // and ambient/hemi hold steady. Day/night changes the SKY, not the lights.
+    cur.sun  += (tgt.sun  - cur.sun ) * dt * 1.5;
+    cur.hemi += (tgt.hemi - cur.hemi) * dt * 1.5;
+
+    sun.position.set(player.position.x + 16, 40, player.position.z + 14); // fixed overhead
+    sun.target.position.set(player.position.x, 0, player.position.z);
+    sun.intensity     = cur.sun;          // steady; no sunFactor dimming
+    sun.castShadow    = true;             // consistent shadows day and night
+    ambient.intensity = 0.6;              // steady fill
+    hemi.intensity    = cur.hemi;         // steady sky fill
+    hemi.color.setRGB(0.61, 0.72, 0.57);  // constant warm-green hemi, no night tint
+
+    // --- The moon is purely decorative now (no longer a light source). ---
+    // It still rises and arcs across the night sky. The directional moon light
+    // is kept off so it can't darken or recolour the scene.
+    moon.intensity  = 0.0;
+    moon.castShadow = false;
+    moon.position.set(player.position.x + moonX * 60, moonY * 60 + 5, player.position.z + 14);
+
+    // visible celestial bodies: sun disc by day, moon disc by night
+    sunMesh.position.set(player.position.x + sunX * 60, sunY * 60 + 5, player.position.z + 14);
+    sunMesh.visible  = sunFactor  > 0.02;
+    sunHalo.position.copy(sunMesh.position);  sunHalo.visible  = sunMesh.visible;
+    moonMesh.position.copy(moon.position); moonMesh.visible = moonFactor > 0.02;
+    moonHalo.position.copy(moon.position); moonHalo.visible = moonMesh.visible;
+
+    // stars fade in as the sky darkens, and follow the player so the dome
+    // always sits overhead wherever they wander.
+    stars.position.set(player.position.x, 0, player.position.z);
+    stars.material.opacity = Math.max(0, (nightFactor - 0.25) * 1.7);
+    stars.visible = stars.material.opacity > 0.02;
+
+    // clouds drift across the sky and fade out at night
+    clouds.position.x = player.position.x; clouds.position.z = player.position.z;
+    cloudMat.opacity = 0.92 * sunFactor;        // gone at night, full by day
+    clouds.visible = cloudMat.opacity > 0.03;
+    if(clouds.visible){
+      for(const c of clouds.children){
+        c.position.x += c.userData.drift * dt;
+        if(c.position.x > 50) c.position.x = -50;   // wrap around
+      }
+    }
+
+    // background & fog transition day -> night (this is the visible change)
+    bgColor.copy(DAY_BG).lerp(NIGHT_BG, nightFactor);
+    scene.background = bgColor;
+    fogColor.copy(DAY_FOG).lerp(NIGHT_FOG, nightFactor);
+    scene.fog.color = fogColor;
+    scene.fog.near += (tgt.fogNear - scene.fog.near) * dt * 1.5;
+    scene.fog.far  += (tgt.fogFar  - scene.fog.far ) * dt * 1.5;
+
+    if(rain.visible){
+      const p=rainGeo.attributes.position;
+      for(let i=0;i<RAIN_N;i++){
+        rainY[i] -= 30*dt;                       // fall speed
+        if(rainY[i] < 0) rainY[i] = RAIN_TOP;    // recycle to the top
+        const y = rainY[i];
+        p.array[i*6+1] = y;                      // top vertex
+        p.array[i*6+4] = y - STREAK;             // bottom vertex
+      }
+      p.needsUpdate=true; rain.position.x=player.position.x; rain.position.z=player.position.z;
+    }
+
+    // cloud shadows: fade in for overcast (strong) and rain (subtle), drift across
+    const shadowTarget = weatherKey==='overcast' ? 0.5 : (weatherKey==='rain' ? 0.28 : 0.0);
+    cloudShadows.position.x = player.position.x; cloudShadows.position.z = player.position.z;
+    let shadowVisible = false;
+    for(const sh of cloudShadows.children){
+      sh.material.opacity += (shadowTarget*sunFactor - sh.material.opacity) * dt * 2;
+      if(sh.material.opacity > 0.01) shadowVisible = true;
+      sh.position.x += sh.userData.drift * dt;
+      if(sh.position.x > 45) sh.position.x = -45;   // wrap
+    }
+    cloudShadows.visible = shadowVisible;
+
+    // --- plant growth ---
+    // rain speeds growth a touch (cosy reward for gardening in the wet)
+    const growMul = rain.visible ? 1.4 : 1.0;
+    for(const pl of plants){
+      // pop-in scale toward this plant's full (footprint-aware) size
+      const full = pl.footScale||1;
+      if(pl.mesh && pl.mesh.scale.x<full){
+        const ns=Math.min(full, pl.mesh.scale.x + dt*3*full);
+        pl.mesh.scale.setScalar(ns);
+      }
+      if(!pl.ripe){
+        pl.grow += dt*growMul;
+        if(pl.grow >= pl.perStage){
+          pl.grow = 0;
+          setPlantStage(pl, pl.stage+1);
+        }
+      }
+      if(pl.ring){               // gentle bob + spin on the gold ring
+        pl.ring.rotation.z += dt*1.5;
+        pl.ring.position.y = 0.06 + Math.sin(now*0.004)*0.06;
+      }
+    }
+
+    // --- hovering identify icon ---
+    if(hoverSprite && hoverSprite.visible && hoverPlant){
+      hoverTimer -= dt;
+      // float above the plant (taller offset for trees)
+      const lift = (hoverPlant.footScale>1 ? 3.4 : 1.8) + Math.sin(now*0.003)*0.12;
+      hoverSprite.position.set(
+        hoverPlant.group.position.x,
+        hoverPlant.group.position.y + lift,
+        hoverPlant.group.position.z
+      );
+      // fade out in the last 0.6s
+      hoverSprite.material.opacity = Math.min(1, hoverTimer/0.6);
+      if(hoverTimer<=0){ hoverSprite.visible=false; hoverPlant=null; }
+    }
+
+    // --- floating prompt follows player on screen ---
+    if(promptTimer>0){
+      promptTimer-=dt;
+      const el=document.getElementById('prompt');
+      TMP_PROJ.copy(player.position); TMP_PROJ.y+=2.6;
+      TMP_PROJ.project(camera);
+      el.style.left=(TMP_PROJ.x*0.5+0.5)*innerWidth+'px';
+      el.style.top=(-TMP_PROJ.y*0.5+0.5)*innerHeight+'px';
+      el.style.transform='translate(-50%,-50%)';
+      if(promptTimer<=0) el.style.display='none';
+    }
+
+    renderer.render(scene,camera);
+    requestAnimationFrame(tick);
+  }
+
+  scene.background=bgColor;
+  generateAllIcons();          // plant icons
+  generateAllBuildingIcons();  // building icons for the trade panel
+  renderLibrary();
+  refreshBasket();
+  tick();
+  setTimeout(()=>{const v=document.getElementById('veil');v.style.opacity=0;setTimeout(()=>v.remove(),800);},600);
+  </script>
+</body>
+</html>
