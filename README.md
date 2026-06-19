@@ -52,8 +52,6 @@ Play the latest version here:
 https:/FireEden.github.io/hollowgrove/
 ```
 
-Replace `YOUR_USERNAME` with your GitHub username after enabling GitHub Pages.
-
 ---
 
 ## 🖥 Running Locally
