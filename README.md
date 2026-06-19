@@ -1,7 +1,7 @@
 # Hollowgrove
 
 <p align="center">
-  <img src="banner.png" alt="Hollowgrove Banner" width="100%">
+  <img src="Banner.png" alt="Hollowgrove Banner" width="100%">
 </p>
 
 <p align="center">
