@@ -73,7 +73,7 @@
     <div id="hint" class="panel">
       <div class="grp"><span class="grp-label">Move</span><span class="key">W</span><span class="key">A</span><span class="key">S</span><span class="key">D</span></div>
       <div class="sep"></div>
-      <div class="grp"><span class="grp-label">Garden</span><span class="key">Space</span><span class="act">plant/build</span><span class="key">F</span><span class="act">harvest / pick up</span><span class="key">B</span><span class="act">dig</span></div>
+      <div class="grp"><span class="grp-label">Action</span><span class="key">Space</span><span class="act">dig / plant / build / harvest</span></div>
       <div class="sep"></div>
       <div class="grp"><span class="grp-label">Build</span><span class="key">R</span><span class="act">rotate</span><span class="key">T</span><span class="act">trade</span></div>
       <div class="sep"></div>
@@ -106,7 +106,7 @@
     <div id="prompt" class="panel" style="display:none;padding:6px 12px;font-size:12px;color:var(--gold-soft);letter-spacing:1px;"></div>
 
     <!-- Trade button (Phase 4) -->
-    <div id="tradeBtn" class="panel" style="bottom:78px;left:50%;transform:translateX(-50%);cursor:pointer;pointer-events:auto;display:flex;align-items:center;gap:8px;">
+    <div id="tradeBtn" class="panel" style="top:16px;left:50%;transform:translateX(-50%);cursor:pointer;pointer-events:auto;display:flex;align-items:center;gap:8px;">
       <span style="font-size:16px;">⛁</span>
       <span style="color:var(--gold-soft);font-size:13px;letter-spacing:1px;">Trade</span>
     </div>
@@ -153,11 +153,17 @@
   let viewSize = 22;           // larger = more zoomed out (broader grove view)
   let isoAngle = Math.PI/4;    // rotates around the scene with Q/E
   const camera = new THREE.OrthographicCamera(-1,1,1,-1,0.1,200);
+  let stars = null, starPlaneW = 1, starPlaneH = 1;   // forward-declared (assigned below)
   function setupOrtho(){
     const aspect = innerWidth/innerHeight;
     camera.left = -viewSize*aspect; camera.right = viewSize*aspect;
     camera.top = viewSize; camera.bottom = -viewSize;
     camera.updateProjectionMatrix();
+    // keep the camera-attached starfield filling the (possibly resized) view
+    if(stars){
+      stars.scale.set((camera.right-camera.left)*1.15/starPlaneW,
+                      (camera.top-camera.bottom)*1.15/starPlaneH, 1);
+    }
   }
   setupOrtho();
 
@@ -223,28 +229,52 @@
   moonHalo.scale.set(9, 9, 1);
   scene.add(moonHalo);
 
-  // Star field — points scattered on the upper hemisphere of a dome that sits
-  // INSIDE the camera's far plane (200). Fixed-size points (no attenuation) so
-  // they read as crisp specks rather than shrinking to nothing at distance.
-  const STAR_COUNT = 900;
-  const starGeo = new THREE.BufferGeometry();
-  const starPos = new Float32Array(STAR_COUNT * 3);
-  for(let i = 0; i < STAR_COUNT; i++){
-    const u = Math.random(), v = Math.random();
-    const theta = 2 * Math.PI * u;
-    const phi = Math.acos(2 * v - 1);
-    const r = 120;                       // inside the 200 far plane
-    starPos[i*3]   = r * Math.sin(phi) * Math.cos(theta);
-    starPos[i*3+1] = Math.abs(r * Math.cos(phi)) + 8;
-    starPos[i*3+2] = r * Math.sin(phi) * Math.sin(theta);
+  // ---------- Star field ----------
+  // Lesson learned: with an ORTHOGRAPHIC camera the view is a fixed-size box,
+  // so a big 3D dome of star-points falls entirely outside the frustum and never
+  // shows. Instead we draw the stars onto a texture and attach that as a plane
+  // PARENTED TO THE CAMERA, sitting just in front of the far plane. Because it
+  // moves with the camera, it always fills the screen behind the scene — exactly
+  // how a real sky backdrop should behave. Opacity fades in at night.
+  function makeStarTexture(){
+    const size = 1024;
+    const c = document.createElement('canvas'); c.width = c.height = size;
+    const ctx = c.getContext('2d');
+    ctx.clearRect(0,0,size,size);
+    // scatter little glowing dots; vary brightness and size for depth
+    const count = 420;
+    for(let i=0;i<count;i++){
+      const x = Math.random()*size, y = Math.random()*size*0.7; // upper portion = sky
+      const r = Math.random()*1.6 + 0.5;
+      const a = Math.random()*0.6 + 0.4;
+      ctx.beginPath();
+      ctx.arc(x,y,r,0,Math.PI*2);
+      ctx.fillStyle = 'rgba(255,255,250,'+a.toFixed(2)+')';
+      ctx.fill();
+      // a soft halo on the brighter ones
+      if(a>0.8){
+        ctx.beginPath(); ctx.arc(x,y,r*2.4,0,Math.PI*2);
+        ctx.fillStyle = 'rgba(200,220,255,0.10)'; ctx.fill();
+      }
+    }
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    return tex;
   }
-  starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
-  const stars = new THREE.Points(starGeo, new THREE.PointsMaterial({
-    color: 0xffffff, size: 2.4, sizeAttenuation:false,
-    transparent:true, opacity:0, fog:false, depthWrite:false
-  }));
-  stars.renderOrder = -1;                // draw behind everything
-  scene.add(stars);
+  const starTex = makeStarTexture();
+  starPlaneW = (camera.right - camera.left) * 1.15;
+  starPlaneH = (camera.top - camera.bottom) * 1.15;
+  stars = new THREE.Mesh(
+    new THREE.PlaneGeometry(starPlaneW, starPlaneH),
+    new THREE.MeshBasicMaterial({ map:starTex, transparent:true, opacity:0, depthWrite:false, depthTest:true, fog:false })
+  );
+  stars.position.set(0, 0, -150);   // camera-local: behind the scene, inside far plane
+  // No renderOrder override: the plane draws in the normal transparent pass,
+  // AFTER opaque terrain has written depth, so foreground ground/objects occlude
+  // it. Result: stars show only on the open sky, never on the farmland.
+  camera.add(stars);                // PARENTED TO CAMERA so it always fills the view
+  scene.add(camera);                // ensure the camera (and its child) is in the scene graph
+
 
   // ---------- Drifting low-poly clouds (day sky) ----------
   // Clusters of flat white boxes high overhead that drift slowly and fade
@@ -326,11 +356,18 @@
     g.rotation.y = ((Math.random()*4)|0)*Math.PI/2; // snap to 90° for voxel feel
     return g;
   }
+  // Environment obstacles (trees, rocks). Tracked so digging a tile can clear
+  // any that stand on it. Each entry: { mesh, x, z }.
+  const envObstacles = [];
+
   const forest = new THREE.Group();
   const R=24;
   for(let a=0;a<Math.PI*2;a+=0.3){
     const rr=R+(Math.random()*4-2);
-    forest.add(makeTree(Math.cos(a)*rr, Math.sin(a)*rr, 2.5+Math.random()*2.5));
+    const tx=Math.cos(a)*rr, tz=Math.sin(a)*rr;
+    const tree=makeTree(tx, tz, 2.5+Math.random()*2.5);
+    forest.add(tree);
+    envObstacles.push({ mesh:tree, x:tx, z:tz, parent:forest });
   }
   world.add(forest);
 
@@ -338,8 +375,10 @@
   for(let i=0;i<14;i++){
     const ang=Math.random()*Math.PI*2, rad=11+Math.random()*10;
     const sz=0.6+Math.random()*0.7;
-    const r=vox(0x4a4a44, sz,sz*0.8,sz, Math.cos(ang)*rad, sz*0.4, Math.sin(ang)*rad, world);
+    const rx=Math.cos(ang)*rad, rz=Math.sin(ang)*rad;
+    const r=vox(0x4a4a44, sz,sz*0.8,sz, rx, sz*0.4, rz, world);
     r.rotation.y=((Math.random()*4)|0)*Math.PI/2;
+    envObstacles.push({ mesh:r, x:rx, z:rz, parent:world });
   }
 
   // ---------- Voxel player (all cubes) ----------
@@ -365,7 +404,6 @@
       refreshPreviewGhost();
       flash('Rotation '+(buildingRotation*90)+'°');
     }
-    if(e.code==='KeyB'){ digHere(); }
     if(e.code==='KeyT'){ setTradeOpen(tradeModal.style.display==='none'); }
     if(e.code==='Escape'){ setTradeOpen(false); }
   });
@@ -373,7 +411,7 @@
 
   // ---------- Weather ----------
   const WEATHERS={
-    sunny:{name:'Sunny',sub:'clear skies over the grove',sun:2.1,fog:0x2a3a30,fogNear:30,fogFar:90,bg:0x3a5240,hemi:0.75,rain:0},
+    sunny:{name:'Sunny',sub:'clear skies over the grove',sun:2.1,fog:0x2a3a30,fogNear:120,fogFar:400,bg:0x3a5240,hemi:0.75,rain:0},
     overcast:{name:'Overcast',sub:'a soft grey hush',sun:1.0,fog:0x384238,fogNear:40,fogFar:110,bg:0x4a544c,hemi:0.65,rain:0},
     rain:{name:'Light rain',sub:'gentle rain on the leaves',sun:0.8,fog:0x2e3630,fogNear:34,fogFar:100,bg:0x384038,hemi:0.62,rain:1}
   };
@@ -1506,20 +1544,43 @@
     if(col < -digBounds || col > digBounds || row < -digBounds || row > digBounds){
       flash('Too close to the world edge'); return;
     }
-    // Build a soil patch that matches the plot's soil appearance
+    // tile centre + bounds in world space
     const half = PLOT/2;
     const cx = -half + (col + 0.5) * TILE;
     const cz = -half + (row + 0.5) * TILE;
+
+    // ---- clear any trees / rocks standing on this tile ----
+    const x0 = cx - TILE/2, x1 = cx + TILE/2;
+    const z0 = cz - TILE/2, z1 = cz + TILE/2;
+    for(let i = envObstacles.length - 1; i >= 0; i--){
+      const o = envObstacles[i];
+      if(o.x >= x0 && o.x < x1 && o.z >= z0 && o.z < z1){
+        o.parent.remove(o.mesh);
+        envObstacles.splice(i, 1);
+      }
+    }
+
+    // ---- soil patch that matches the central plot exactly ----
+    // Same colour, same full-tile size (no inset gap), same surface height, so a
+    // dug tile is visually indistinguishable from the starting plot.
     const soil = new THREE.Mesh(
-      new THREE.BoxGeometry(TILE - 0.06, 0.5, TILE - 0.06),
+      new THREE.BoxGeometry(TILE, 0.5, TILE),
       vmat(0x5a4329)
     );
-    soil.position.set(cx, 0.05, cz);
+    soil.position.set(cx, 0.05, cz);   // top surface at y=0.30, same as the plot
     soil.receiveShadow = true;
     world.add(soil);
+
+    // matching grid lines on top (same colours/height as the plot's GridHelper)
+    const dGrid = new THREE.GridHelper(TILE, 1, 0x8a6a3a, 0x6b5128);
+    dGrid.position.set(cx, 0.31, cz);
+    dGrid.material.opacity = 0.4; dGrid.material.transparent = true;
+    world.add(dGrid);
+
     digMeshes[key] = soil;
     digTiles.add(key);
     exitBuildMode();   // clear any lingering build ghost
+    lastPreviewKey = ''; // force preview/inventory to re-evaluate this now-plantable tile
     flash('Dug a soil patch ('+(col)+','+(row)+')');
   }
 
@@ -1686,15 +1747,49 @@
     el.textContent=msg; el.style.display='block'; promptTimer=2;
   }
 
-  // keys for planting / building / harvesting / picking up
+  // ---------- Single contextual action (Space) ----------
+  // One button does the sensible thing for where the player stands:
+  //   1. placing a building from the library  -> build it
+  //   2. standing on a ripe plant             -> harvest it
+  //   3. standing on a placed building/decor   -> pick it up
+  //   4. standing on plantable soil            -> plant the selected seed
+  //   5. standing on bare grass (diggable)     -> dig it into soil
+  function primaryAction(){
+    const {col,row} = colRowAt(player.position.x, player.position.z);
+    const key = col+','+row;
+
+    // 1. explicit build intent always wins
+    if(placingBuilding){ buildHere(); return; }
+
+    // 2. ripe plant on this tile -> harvest
+    let plant = occupied[key];
+    if(!plant || plant.kind !== 'plant') plant = plants.find(p => p.keys.includes(key));
+    if(plant && plant.kind === 'plant'){
+      if(plant.ripe) harvestHere();
+      else flash(plant.entry.name+' is still growing');
+      return;
+    }
+
+    // 3. placed building / decor / fence / bed on this tile -> pick up
+    const occ = occupied[key];
+    if(occ && occ.entry!==undefined &&
+       (occ.kind==='decor'||occ.kind==='build'||occ.kind==='fence'||occ.kind==='bed')){
+      removeHere();
+      return;
+    }
+
+    // 4. plantable soil (plot or dug tile) -> plant
+    if(isPlantable(col,row)){ plantHere(); return; }
+
+    // 5. bare grass within dig range -> dig
+    digHere();
+  }
+
+  // keys for the single contextual action
   addEventListener('keydown',e=>{
     if(e.code==='Space'){
       e.preventDefault();
-      if(placingBuilding) buildHere(); else plantHere();
-    }
-    if(e.code==='KeyF'){
-      // F tries to pick up a building first; falls back to harvesting a plant
-      if(!removeHere()) harvestHere();
+      primaryAction();
     }
   });
 
@@ -1740,19 +1835,19 @@
       legR.rotation.x=-Math.sin(walkPhase)*0.6;
     } else { legL.rotation.x*=0.8; legR.rotation.x*=0.8; }
 
-    // --- inventory pops up when standing on the soil plot ---
-    const half=PLOT/2;
-    const nowOnPlot = Math.abs(player.position.x)<=half && Math.abs(player.position.z)<=half;
+    // --- inventory pops up when standing on ANY plantable soil ---
+    // (the central plot OR a tile the player has dug up). isPlantable covers both.
+    const pcol = Math.floor((player.position.x + PLOT/2)/TILE);
+    const prow = Math.floor((player.position.z + PLOT/2)/TILE);
+    const nowOnPlot = isPlantable(pcol, prow);
     if(nowOnPlot!==onPlot){
       onPlot=nowOnPlot;
       if(onPlot) renderLibrary();
       setInventoryVisible(onPlot);
     }
-    // live footprint highlight follows the player while on the plot.
+    // live footprint highlight follows the player while on plantable soil.
     // Only recompute when something it depends on actually changed
     // (player tile, selection, build/plant mode, or rotation).
-    const pcol = Math.floor((player.position.x + PLOT/2)/TILE);
-    const prow = Math.floor((player.position.z + PLOT/2)/TILE);
     const previewKey = pcol+','+prow+'|'+(placingBuilding?'B'+selectedBuild:'P'+selectedSeed)+'|'+buildingRotation+'|'+(onPlot?1:0);
     if(previewKey !== lastPreviewKey){
       lastPreviewKey = previewKey;
@@ -1818,10 +1913,9 @@
     moonMesh.position.copy(moon.position); moonMesh.visible = moonFactor > 0.02;
     moonHalo.position.copy(moon.position); moonHalo.visible = moonMesh.visible;
 
-    // stars fade in as the sky darkens, and follow the player so the dome
-    // always sits overhead wherever they wander.
-    stars.position.set(player.position.x, 0, player.position.z);
-    stars.material.opacity = Math.max(0, (nightFactor - 0.25) * 1.7);
+    // stars fade in as the sky darkens. The plane is parented to the camera,
+    // so it follows the view automatically — we only adjust its opacity here.
+    stars.material.opacity = Math.max(0, (nightFactor - 0.2) * 1.6);
     stars.visible = stars.material.opacity > 0.02;
 
     // clouds drift across the sky and fade out at night
