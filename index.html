@@ -551,6 +551,7 @@
     { name:'Stone Lantern',  kind:'decor', foot:1,  cost:0, swatch:0xc8a060 },
     { name:'Mushroom Ring',  kind:'decor', foot:1,  cost:0, swatch:0xc89070 },
     { name:'Bird Bath',      kind:'decor', foot:1,  cost:0, swatch:0x9ab8c8 },
+    { name:'Bee Hive',       kind:'build', footW:2, footH:1, cost:0, swatch:0xe0b050 },
     { name:'Wooden Fence',   kind:'fence', foot:1,  cost:0, swatch:0x8a6a3a },
     { name:'Raised Bed',     kind:'bed',   footW:2, footH:3, cost:0, swatch:0x6cae9d },
     { name:'Garden Bench',   kind:'build', foot:2,  cost:3,  revealAt:2,  swatch:0x6b4a2a },
@@ -908,6 +909,25 @@
       vox(0xe08030, 0.12, 0.04, 0.18, 0.3*u,  0.34, 0.2*u, g);
       vox(0xe08030, 0.12, 0.04, 0.18, -0.2*u, 0.34,-0.3*u, g);
     }
+    else if(b.name==='Bee Hive'){
+      // Non-square 2x1 footprint. Like the bed, respect the placement rotation
+      // so the hive's long side follows the tiles it occupies.
+      const W = b.footW ?? 2, H = b.footH ?? 1;
+      const rot = (b._placementRot|0);
+      const wT = (rot%2===0) ? W : H;
+      const wu = wT * TILE;
+      // a little stand
+      vox(0x6a4a2a, wu*0.8, 0.12, TILE*0.7, 0, 0.06, 0, g);
+      // stacked hive boxes (classic langstroth look), golden-tan
+      const boxW = TILE*0.85, boxD = TILE*0.7;
+      vox(0xd9a850, boxW, 0.34, boxD, 0, 0.29, 0, g);   // bottom super
+      vox(0xe0b860, boxW, 0.32, boxD, 0, 0.62, 0, g);   // middle super
+      vox(0xd9a850, boxW, 0.30, boxD, 0, 0.93, 0, g);   // top super
+      vox(0x8a5a2a, boxW*1.08, 0.12, boxD*1.08, 0, 1.14, 0, g); // lid
+      // entrance slot + landing board on the front
+      vox(0x3a2a18, boxW*0.5, 0.06, 0.08, 0, 0.16, boxD*0.5, g);
+      vox(0xc89040, boxW*0.6, 0.04, 0.18, 0, 0.13, boxD*0.62, g);
+    }
     else if(b.name==='Raised Bed'){
       // Non-square footprint. buildBuilding is called with the CURRENT rotation
       // (buildingRotation for the preview, or the saved quarter-turn for the
@@ -1126,11 +1146,13 @@
     };
   }
 
-  // List the tile keys covered by a footprint. Returns null if any tile is off-plot.
+  // List the tile keys covered by a footprint. Returns null if any tile is not
+  // plantable ground (the central plot OR a dug tile). Using isPlantable here —
+  // not inPlot — is what lets you plant/build on freshly dug land.
   function footprintTiles(col,row,w,h){
     const keys=[];
     for(let c=col;c<col+w;c++) for(let r=row;r<row+h;r++){
-      if(!inPlot(c,r)) return null;
+      if(!isPlantable(c,r)) return null;
       keys.push(c+','+r);
     }
     return keys;
@@ -1795,6 +1817,242 @@
 
   addEventListener('resize',()=>{setupOrtho();renderer.setSize(innerWidth,innerHeight);});
 
+  /* ============================================================
+     WILDLIFE SYSTEM
+     Small voxel creatures that wander into the grove on their own.
+
+       squirrel / deer : pests — walk to a ripe veggie or fruit and eat it
+                         (the plant is destroyed). A reason to fence things in.
+       bird            : visits a Bird Bath, hops/bathes, then flies off (nice)
+       bee / butterfly : drawn to flowers and bee hives; flutter around (ambiance)
+
+     Each critter is a little state machine:
+       'arrive' -> move toward a target
+       'act'    -> do its thing at the target (eat / bathe / flutter)
+       'leave'  -> walk back off the map, then despawn
+     ============================================================ */
+  const critters = [];                 // active creatures
+  const CRITTER_CAP = 14;              // never spawn more than this many at once
+
+  // --- build simple voxel bodies for each animal ---
+  function buildCritter(type){
+    const g = new THREE.Group();
+    if(type==='squirrel'){
+      vox(0x8a5a2a, 0.28,0.26,0.42, 0,0.18,0, g);          // body
+      vox(0x8a5a2a, 0.22,0.22,0.22, 0,0.34,0.18, g);       // head
+      vox(0x6a4520, 0.12,0.5,0.32, 0,0.4,-0.28, g);        // bushy tail
+      vox(0x2a1a0a, 0.05,0.05,0.05, 0.06,0.4,0.30, g);     // eye
+    } else if(type==='deer'){
+      vox(0xa57848, 0.42,0.46,0.8, 0,0.6,0, g);            // body
+      vox(0x8a6038, 0.22,0.5,0.22, 0,0.3,0, g);            // (filler) neck base
+      vox(0xa57848, 0.26,0.3,0.3, 0,0.95,0.4, g);          // head
+      vox(0x6a4a2a, 0.1,0.5,0.1, -0.14,0.28,0.32, g);      // legs
+      vox(0x6a4a2a, 0.1,0.5,0.1, 0.14,0.28,0.32, g);
+      vox(0x6a4a2a, 0.1,0.5,0.1, -0.14,0.28,-0.32, g);
+      vox(0x6a4a2a, 0.1,0.5,0.1, 0.14,0.28,-0.32, g);
+      vox(0xe0d0b0, 0.06,0.2,0.06, -0.08,1.15,0.42, g);    // antlers
+      vox(0xe0d0b0, 0.06,0.2,0.06, 0.08,1.15,0.42, g);
+    } else if(type==='bird'){
+      vox(0x4a7ad0, 0.18,0.16,0.26, 0,0.1,0, g);           // body
+      vox(0x4a7ad0, 0.14,0.14,0.14, 0,0.2,0.12, g);        // head
+      vox(0xe0a040, 0.05,0.05,0.08, 0,0.2,0.22, g);        // beak
+      vox(0x3a5aa0, 0.26,0.04,0.16, 0,0.12,-0.02, g);      // wings
+    } else if(type==='bee'){
+      vox(0xe0c040, 0.14,0.12,0.18, 0,0,0, g);             // body
+      vox(0x2a2a2a, 0.15,0.13,0.05, 0,0,0.02, g);          // stripe
+      vox(0xffffff, 0.18,0.02,0.12, 0,0.06,0, g);          // wings (flat)
+    } else if(type==='butterfly'){
+      const c = [0xe060a0,0xf0a040,0x60a0e0][Math.random()*3|0];
+      vox(0x3a2a2a, 0.04,0.04,0.16, 0,0,0, g);             // body
+      vox(c, 0.16,0.02,0.14, -0.1,0.02,0, g);              // left wings
+      vox(c, 0.16,0.02,0.14, 0.1,0.02,0, g);               // right wings
+    }
+    return g;
+  }
+
+  // a point on the forest ring, where ground critters enter/exit
+  function edgePoint(){
+    const a = Math.random()*Math.PI*2;
+    const r = 26 + Math.random()*4;
+    return new THREE.Vector3(Math.cos(a)*r, 0, Math.sin(a)*r);
+  }
+
+  // find a ripe veggie/fruit plant (what pests want to eat)
+  function findEdiblePlant(){
+    const edible = plants.filter(p =>
+      p.ripe && (p.entry.cat==='veg' || p.entry.cat==='fruit' || p.entry.cat==='ftree')
+    );
+    return edible.length ? edible[Math.random()*edible.length|0] : null;
+  }
+  function findPlacedByName(name){
+    const list = placed.filter(o => o.entry && o.entry.name===name);
+    return list.length ? list[Math.random()*list.length|0] : null;
+  }
+  function findFlower(){
+    const flowers = plants.filter(p => p.entry.cat==='flower' && p.stage>=1);
+    return flowers.length ? flowers[Math.random()*flowers.length|0] : null;
+  }
+
+  function spawnCritter(type, target){
+    if(critters.length >= CRITTER_CAP) return;
+    const mesh = buildCritter(type);
+    const flying = (type==='bird'||type==='bee'||type==='butterfly');
+    const start = flying
+      ? edgePoint().setY(type==='bird' ? 6 : 2.5)
+      : edgePoint();
+    mesh.position.copy(start);
+    scene.add(mesh);
+    critters.push({
+      type, mesh, target,
+      state:'arrive',
+      flying,
+      speed: type==='deer' ? 2.2 : type==='squirrel' ? 3.2 : type==='bird' ? 4 : 2.6,
+      timer: 0,                 // counts time spent in the 'act' state
+      actDur: type==='bird' ? 5 : (flying ? 9999 : 2.5), // flutter critters linger
+      bob: Math.random()*Math.PI*2,
+      home: start.clone(),      // where it leaves toward
+    });
+  }
+
+  // move a critter toward a 3D point; returns true when close enough
+  const _tmpDir = new THREE.Vector3();
+  function moveToward(c, point, dt){
+    _tmpDir.copy(point).sub(c.mesh.position);
+    if(c.flying){
+      // keep flying height while approaching
+    } else {
+      _tmpDir.y = 0;
+    }
+    const dist = _tmpDir.length();
+    if(dist < 0.4) return true;
+    _tmpDir.normalize();
+    c.mesh.position.addScaledVector(_tmpDir, c.speed*dt);
+    // face travel direction
+    c.mesh.rotation.y = Math.atan2(_tmpDir.x, _tmpDir.z);
+    return false;
+  }
+
+  // chance-based spawning, checked a few times per second (not every frame)
+  let spawnClock = 0;
+  function maybeSpawn(dt, isDay){
+    spawnClock += dt;
+    if(spawnClock < 1.2) return;     // evaluate ~ once per 1.2s
+    spawnClock = 0;
+    if(!isDay) return;               // wildlife is active in daytime only
+
+    // PESTS: squirrels/deer come for ripe edible crops
+    if(Math.random() < 0.18){
+      const target = findEdiblePlant();
+      if(target){
+        spawnCritter(Math.random()<0.6 ? 'squirrel' : 'deer', target);
+      }
+    }
+    // BIRDS: only if a bird bath exists
+    if(Math.random() < 0.25){
+      const bath = findPlacedByName('Bird Bath');
+      if(bath) spawnCritter('bird', bath);
+    }
+    // BEES: drawn to flowers, more likely if a bee hive exists
+    const hive = findPlacedByName('Bee Hive');
+    if(Math.random() < (hive ? 0.5 : 0.22)){
+      const flower = findFlower();
+      const target = flower || hive;
+      if(target) spawnCritter('bee', target);
+    }
+    // BUTTERFLIES: drawn to flowers
+    if(Math.random() < 0.22){
+      const flower = findFlower();
+      if(flower) spawnCritter('butterfly', flower);
+    }
+  }
+
+  // resolve a critter target's current world position (it may have been removed)
+  function targetPos(c){
+    const t = c.target;
+    if(!t) return null;
+    // plants store a group; placed buildings store a group too
+    if(t.group && t.group.parent) return t.group.position;
+    return null;   // target gone (harvested / removed)
+  }
+
+  function updateCritters(dt, now){
+    for(let i=critters.length-1; i>=0; i--){
+      const c = critters[i];
+      const tp = targetPos(c);
+
+      // gentle wing-bob for flyers (bees & butterflies hover; birds land)
+      if(c.flying && c.type!=='bird'){
+        c.bob += dt*12;
+        // hover at a pleasant height, bobbing up and down a little
+        const baseY = (c.state==='act' && tp) ? 1.1 : 1.6;
+        c.mesh.position.y = baseY + Math.sin(c.bob)*0.3;
+      } else if(c.type==='bird'){
+        c.bob += dt*8;
+      }
+
+      if(c.state==='arrive'){
+        if(!tp){ c.state='leave'; continue; }   // target vanished, go home
+        const dest = _arriveDest(c, tp);
+        if(moveToward(c, dest, dt)){
+          c.state='act'; c.timer=0;
+        }
+      }
+      else if(c.state==='act'){
+        c.timer += dt;
+        if(!tp && c.type!=='butterfly' && c.type!=='bee'){ c.state='leave'; continue; }
+        // PEST eats the plant on arrival
+        if((c.type==='squirrel'||c.type==='deer') && c.target && c.target.kind==='plant'){
+          eatPlant(c.target);
+          c.target=null;
+          c.state='leave';
+          continue;
+        }
+        // flutter/bathe in place for a while
+        if(tp){
+          if(c.type==='bee' || c.type==='butterfly'){
+            // circle the flower
+            const ang = c.bob;
+            c.mesh.position.x = tp.x + Math.cos(ang)*0.7;
+            c.mesh.position.z = tp.z + Math.sin(ang)*0.7;
+          }
+        }
+        if(c.timer >= c.actDur){ c.state='leave'; }
+        // flyers without a target also eventually leave
+        if(!tp && c.timer>3){ c.state='leave'; }
+      }
+      else if(c.state==='leave'){
+        const goneHome = moveToward(c, c.home, dt);
+        if(goneHome || c.mesh.position.distanceTo(player.position) > 60){
+          scene.remove(c.mesh);
+          critters.splice(i,1);
+        }
+      }
+    }
+  }
+
+  // where exactly to stand relative to the target
+  const _destTmp = new THREE.Vector3();
+  function _arriveDest(c, tp){
+    if(c.type==='bird'){
+      // land on the bird bath bowl
+      return _destTmp.set(tp.x, 0.9, tp.z);
+    }
+    if(c.flying){
+      return _destTmp.set(tp.x, 1.6, tp.z);
+    }
+    return _destTmp.set(tp.x, 0, tp.z);
+  }
+
+  // a pest eats a plant: remove it from the world and free its tiles
+  function eatPlant(plant){
+    const idx = plants.indexOf(plant);
+    if(idx<0) return;                      // already gone
+    world.remove(plant.group);
+    if(!plant.onBed) clearArea(plant.keys);
+    plants.splice(idx,1);
+    flash('A critter ate your '+plant.entry.name+'!');
+  }
+
   // ---------- Loop ----------
   const clock=new THREE.Clock();
   let walkPhase=0, camAngle=isoAngle;
@@ -2000,6 +2258,10 @@
     }
 
     // --- floating prompt follows player on screen ---
+    // --- wildlife ---
+    maybeSpawn(dt, sunFactor > 0.15);   // active during daytime
+    updateCritters(dt, now);
+
     if(promptTimer>0){
       promptTimer-=dt;
       const el=document.getElementById('prompt');
