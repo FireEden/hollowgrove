@@ -83,12 +83,12 @@
     <!-- Inventory: an icon that's normally collapsed; expands on the plot -->
     <div id="invIcon" class="panel" style="bottom:78px;left:16px;display:flex;align-items:center;gap:8px;cursor:pointer;pointer-events:auto;">
       <span style="font-size:18px;">🌱</span>
-      <span style="color:var(--gold-soft);font-size:13px;letter-spacing:1px;">Seeds</span>
+      <span style="color:var(--gold-soft);font-size:13px;letter-spacing:1px;">Inventory</span>
     </div>
 
     <div id="invPanel" class="panel" style="bottom:78px;left:16px;min-width:240px;display:none;pointer-events:auto;">
       <div style="display:flex;justify-content:space-between;align-items:center;">
-        <span style="color:var(--gold);letter-spacing:1px;font-size:11px;">SEED &amp; CUTTING LIBRARY</span>
+        <span style="color:var(--gold);letter-spacing:1px;font-size:11px;">INVENTORY</span>
         <span id="invClose" style="color:var(--gold);cursor:pointer;font-size:12px;opacity:.7;">▾</span>
       </div>
       <div class="title-rule"></div>
@@ -663,10 +663,12 @@
         'border:1px solid '+(active?'var(--gold)':'transparent')+';'+
         'background:'+(active?'rgba(217,178,90,0.12)':'transparent')+';';
 
-      // colour swatch (buildings skip the icon generator in this phase)
+      // isometric building icon (falls back to a colour chip if not generated yet)
       const sw=document.createElement('div');
       sw.style.cssText='width:34px;height:34px;flex:0 0 auto;border-radius:6px;border:1px solid var(--panel-edge);'+
-        'background:linear-gradient(135deg,'+hex(c.swatch)+','+hex(shade(c.swatch,-0.25))+');';
+        'background:rgba(0,0,0,0.18);background-size:contain;background-repeat:no-repeat;background-position:center;';
+      if(c.icon) sw.style.backgroundImage='url('+c.icon+')';
+      else sw.style.background='linear-gradient(135deg,'+hex(c.swatch)+','+hex(shade(c.swatch,-0.25))+')';
       row.appendChild(sw);
 
       const txt=document.createElement('div'); txt.style.flex='1';
@@ -860,9 +862,32 @@
     else if(b.name==='Stone Lantern'){
       vox(0x5a4a3a, u*0.6, 0.25, u*0.6, 0, 0.125, 0, g);   // base stone
       vox(0x9a8a6a, u*0.3, 0.7,  u*0.3, 0, 0.6,   0, g);   // post
-      vox(0xc8a060, u*0.55,0.4,  u*0.55,0, 1.15,  0, g);   // glowing box
+      // four corner posts framing the light chamber (so the glow shows through)
+      vox(0x6a5a4a, u*0.5, 0.42, u*0.5, 0, 1.15, 0, g);    // housing frame
+      // the "bulb" — its own emissive material so it can glow at night
+      const bulb = vox(0xffe7a0, u*0.34, 0.34, u*0.34, 0, 1.15, 0, g);
+      bulb.material = new THREE.MeshStandardMaterial({
+        color:0xffe7a0, emissive:0xffce5a, emissiveIntensity:0, flatShading:true, roughness:1
+      });
       vox(0x6a5a4a, u*0.7, 0.1,  u*0.7, 0, 1.4,   0, g);   // roof lip
       vox(0x4a3a2a, u*0.25,0.15, u*0.25,0, 1.55,  0, g);   // finial
+      // a warm point light inside the lantern (starts off; toggled by time of day)
+      const light = new THREE.PointLight(0xffcf6a, 0, 8, 1.5);
+      light.position.set(0, 1.15, 0);
+      g.add(light);
+      // a soft additive glow halo so the light is clearly visible at night
+      const halo = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: makeRadialTexture('#ffe6a0','#ffe6a000'),
+        color:0xffd96a, transparent:true, opacity:0,
+        blending:THREE.AdditiveBlending, depthWrite:false, fog:false
+      }));
+      halo.position.set(0, 1.15, 0);
+      halo.scale.set(2.2, 2.2, 1);
+      g.add(halo);
+      // tag so the day/night loop can find and dim/brighten these
+      g.userData.lanternBulb = bulb;
+      g.userData.lanternLight = light;
+      g.userData.lanternHalo = halo;
     }
     else if(b.name==='Mushroom Ring'){
       const stem=0xc89070, cap=0xf0d0a0;
@@ -916,17 +941,34 @@
       const rot = (b._placementRot|0);
       const wT = (rot%2===0) ? W : H;
       const wu = wT * TILE;
-      // a little stand
-      vox(0x6a4a2a, wu*0.8, 0.12, TILE*0.7, 0, 0.06, 0, g);
-      // stacked hive boxes (classic langstroth look), golden-tan
-      const boxW = TILE*0.85, boxD = TILE*0.7;
-      vox(0xd9a850, boxW, 0.34, boxD, 0, 0.29, 0, g);   // bottom super
-      vox(0xe0b860, boxW, 0.32, boxD, 0, 0.62, 0, g);   // middle super
-      vox(0xd9a850, boxW, 0.30, boxD, 0, 0.93, 0, g);   // top super
-      vox(0x8a5a2a, boxW*1.08, 0.12, boxD*1.08, 0, 1.14, 0, g); // lid
-      // entrance slot + landing board on the front
-      vox(0x3a2a18, boxW*0.5, 0.06, 0.08, 0, 0.16, boxD*0.5, g);
-      vox(0xc89040, boxW*0.6, 0.04, 0.18, 0, 0.13, boxD*0.62, g);
+      // wooden stand with little legs
+      vox(0x6a4a2a, wu*0.82, 0.14, TILE*0.78, 0, 0.10, 0, g);          // platform
+      vox(0x4a3318, 0.12,0.18,0.12, -wu*0.3, 0.03, -TILE*0.28, g);     // legs
+      vox(0x4a3318, 0.12,0.18,0.12,  wu*0.3, 0.03, -TILE*0.28, g);
+      vox(0x4a3318, 0.12,0.18,0.12, -wu*0.3, 0.03,  TILE*0.28, g);
+      vox(0x4a3318, 0.12,0.18,0.12,  wu*0.3, 0.03,  TILE*0.28, g);
+
+      // a classic straw "skep" dome on the LEFT of the 2-wide footprint
+      const lx = -wu*0.24;
+      vox(0xd9a850, 0.95, 0.34, 0.85, lx, 0.36, 0, g);   // wide base ring
+      vox(0xe0b860, 0.80, 0.30, 0.72, lx, 0.66, 0, g);   // mid ring (narrower)
+      vox(0xd9a850, 0.62, 0.26, 0.56, lx, 0.92, 0, g);   // upper ring
+      vox(0xe8c068, 0.40, 0.22, 0.36, lx, 1.13, 0, g);   // dome top
+      vox(0x8a5a2a, 0.12, 0.14, 0.12, lx, 1.28, 0, g);   // little knob
+      vox(0x3a2a18, 0.22, 0.10, 0.06, lx, 0.24, 0.43, g);// entrance hole (front)
+
+      // a stacked box hive on the RIGHT
+      const rx = wu*0.24;
+      vox(0xc89040, 0.72, 0.30, 0.66, rx, 0.33, 0, g);   // bottom super
+      vox(0xe0b860, 0.72, 0.28, 0.66, rx, 0.62, 0, g);   // top super
+      vox(0x8a5a2a, 0.80, 0.10, 0.74, rx, 0.81, 0, g);   // lid
+      vox(0x6a4a2a, 0.50, 0.04, 0.16, rx, 0.20, 0.40, g);// landing board
+      vox(0x3a2a18, 0.34, 0.05, 0.05, rx, 0.30, 0.34, g);// entrance slot
+
+      // a couple of decorative resting bees (tiny)
+      vox(0xe0c040, 0.10,0.08,0.13, lx+0.2, 0.78, 0.4, g);
+      vox(0x2a2a2a, 0.11,0.05,0.04, lx+0.2, 0.78, 0.41, g);
+      vox(0xe0c040, 0.10,0.08,0.13, rx-0.15, 0.50, 0.38, g);
     }
     else if(b.name==='Raised Bed'){
       // Non-square footprint. buildBuilding is called with the CURRENT rotation
@@ -1090,7 +1132,11 @@
   function generateBuildingIcon(entry){
     const scene2 = new THREE.Scene();
     entry._placementRot = 0;
-    const model = buildBuilding(entry);
+    // Fences use a different builder; render a short connected run so the icon
+    // reads clearly as a fence rather than coming out blank.
+    const model = (entry.kind==='fence')
+      ? buildFenceMesh({n:false, s:false, e:true, w:true})
+      : buildBuilding(entry);
     const box = new THREE.Box3().setFromObject(model);
     const c = box.getCenter(new THREE.Vector3());
     model.position.sub(new THREE.Vector3(c.x, box.min.y, c.z));
@@ -1473,7 +1519,6 @@
   // Plants (kind!=='building') are NOT affected here — harvestHere handles those.
   function removeHere(){
     const {col,row} = colRowAt(player.position.x, player.position.z);
-    if(!inPlot(col,row)) return false;
     const o = occupied[col+','+row];
     if(!o || o.entry===undefined || (o.kind!=='decor' && o.kind!=='build' && o.kind!=='fence' && o.kind!=='bed')) return false;
     // remove the object + free its tiles, then re-link any fence neighbours
@@ -1485,7 +1530,6 @@
     if(o.kind==='fence'){
       const [c,r] = [col,row];
       [[c,r-1],[c,r+1],[c+1,r],[c-1,r]].forEach(([nc,nr])=>{
-        if(!inPlot(nc,nr)) return;
         const k = nc+','+nr;
         const no = occupied[k];
         if(!no || no.kind!=='fence') return;
@@ -1539,12 +1583,30 @@
     }
     if(!plant){ flash('Nothing here to harvest'); return; }
     if(!plant.ripe){ flash(plant.entry.name+' is still growing'); return; }
+
+    const isTree = plant.entry.cat === 'ftree' || plant.entry.cat === 'tree';
+
     // yield: produce item named after the plant (ftree yields the fruit, not the tree)
     const yieldName = plant.entry.cat === 'ftree'
       ? plant.entry.name.replace(' Tree','')
       : plant.entry.name;
     addToBasket(yieldName);
     totalHarvested++;
+
+    if(isTree){
+      // The TREE stays — we only pick its fruit/buds. Reset it to the bare
+      // 'mature' stage so the fruit (or oak buds) regrows over time.
+      const matureIdx = plant.seq.indexOf('mature');
+      flash('Picked '+yieldName+' — the tree will regrow');
+      // remove the ripe ring; setPlantStage will re-add one when ripe again
+      if(plant.ring){ plant.group.remove(plant.ring); plant.ring=null; }
+      setPlantStage(plant, matureIdx >= 0 ? matureIdx : 1);
+      plant.grow = 0;
+      exitBuildMode();
+      renderLibrary();
+      return;
+    }
+
     flash('Harvested '+plant.entry.name);
     // remove plant and free ALL tiles it covered
     world.remove(plant.group);
@@ -1629,11 +1691,11 @@
     { name:'Pumpkin Seed', needs:{Tomato:2, Carrot:1},              rewardKind:'seed',     rewardIdx:5,  hint:'hearty autumn vine' },
     { name:'Lavender Seed', needs:{Marigold:3, Bluebell:2},          rewardKind:'seed',     rewardIdx:6,  hint:'fragrant purple bloom' },
     { name:'Apple Tree',   needs:{Tomato:4, Carrot:2, Marigold:1},  rewardKind:'seed',     rewardIdx:7,  hint:'a small fruit tree' },
-    { name:'Cherry Tree',  needs:{Apple:3, Tomato:2},               rewardKind:'seed',     rewardIdx:8,  hint:'pink spring blossoms' },
+    { name:'Cherry Tree',  needs:{Apple:3, Honey:2},                rewardKind:'seed',     rewardIdx:8,  hint:'pink blossoms, loves honey' },
     { name:'Oak Sapling',  needs:{Carrot:4, Tomato:3, Basil:2},     rewardKind:'seed',     rewardIdx:9,  hint:'a slow, sturdy oak' },
     { name:'Garden Bench', needs:{Tomato:3},                        rewardKind:'building', rewardIdx:6,  hint:'a weathered wooden bench' },
     { name:'Pagoda',       needs:{Apple:5, Tomato:5, Carrot:3},     rewardKind:'building', rewardIdx:7,  hint:'a tall tiered pavilion' },
-    { name:'Koi Pond',     needs:{Apple:5, Cherry:3, Tomato:5},     rewardKind:'building', rewardIdx:8,  hint:'a sunken pool with koi' },
+    { name:'Koi Pond',     needs:{Apple:5, Cherry:3, Honey:4},      rewardKind:'building', rewardIdx:8,  hint:'a sunken pool with koi' },
   ];
 
   function canAffordTrade(t){
@@ -1768,6 +1830,16 @@
     const el=document.getElementById('prompt');
     el.textContent=msg; el.style.display='block'; promptTimer=2;
   }
+  function clearPrompt(){
+    promptTimer=0;
+    document.getElementById('prompt').style.display='none';
+  }
+
+  // two-step removal: first Space asks, second Space (on the same tile) confirms.
+  // Walking off the tile cancels. pendingRemove holds the object awaiting confirm,
+  // and pendingRemoveKey the tile it's on (so we can detect walking away).
+  let pendingRemove = null;
+  let pendingRemoveKey = null;
 
   // ---------- Single contextual action (Space) ----------
   // One button does the sensible thing for where the player stands:
@@ -1780,30 +1852,48 @@
     const {col,row} = colRowAt(player.position.x, player.position.z);
     const key = col+','+row;
 
-    // 1. explicit build intent always wins
-    if(placingBuilding){ buildHere(); return; }
-
-    // 2. ripe plant on this tile -> harvest
+    // Find a plant on this tile (soil plants live in occupied; bed plants in plants[]).
     let plant = occupied[key];
     if(!plant || plant.kind !== 'plant') plant = plants.find(p => p.keys.includes(key));
-    if(plant && plant.kind === 'plant'){
-      if(plant.ripe) harvestHere();
-      else flash(plant.entry.name+' is still growing');
+    const ripePlantHere = plant && plant.kind==='plant' && plant.ripe;
+
+    // 0. A ripe plant under our feet is always harvestable — even in build mode,
+    //    so harvesting works right after placing a building. (Fixes "tile is taken".)
+    if(ripePlantHere){ pendingRemove=null; harvestHere(); return; }
+
+    // 1. If we're confirming a removal, a second Space confirms it.
+    if(pendingRemove){
+      const stillThere = occupied[key]===pendingRemove;
+      pendingRemove = null; pendingRemoveKey = null; clearPrompt();
+      if(stillThere){ removeHere(); }
       return;
     }
 
-    // 3. placed building / decor / fence / bed on this tile -> pick up
+    // 2. explicit build intent
+    if(placingBuilding){ buildHere(); return; }
+
+    // 3. a growing (not-yet-ripe) plant -> tell the player it's still growing
+    if(plant && plant.kind==='plant'){ flash(plant.entry.name+' is still growing'); return; }
+
+    // 4. placed building / decor / fence / bed -> ask before removing.
+    //    EXCEPTION: a raised bed with an herb selected is a planting surface.
     const occ = occupied[key];
-    if(occ && occ.entry!==undefined &&
+    const selEntry = CATALOG[selectedSeed];
+    const wantPlantOnBed = occ && occ.kind==='bed' && selEntry && selEntry.cat==='herb';
+    if(occ && occ.entry!==undefined && !wantPlantOnBed &&
        (occ.kind==='decor'||occ.kind==='build'||occ.kind==='fence'||occ.kind==='bed')){
-      removeHere();
+      pendingRemove = occ;
+      pendingRemoveKey = key;
+      const el=document.getElementById('prompt');
+      el.textContent='Remove '+occ.entry.name+'? Space to confirm'; el.style.display='block';
+      promptTimer = 999;   // stays until confirmed or cancelled by walking away
       return;
     }
 
-    // 4. plantable soil (plot or dug tile) -> plant
-    if(isPlantable(col,row)){ plantHere(); return; }
+    // 5. plantable soil (plot or dug tile) OR a bed with an herb -> plant
+    if(isPlantable(col,row) || wantPlantOnBed){ plantHere(); return; }
 
-    // 5. bare grass within dig range -> dig
+    // 6. bare grass within dig range -> dig
     digHere();
   }
 
@@ -1853,10 +1943,22 @@
       vox(0xe0d0b0, 0.06,0.2,0.06, -0.08,1.15,0.42, g);    // antlers
       vox(0xe0d0b0, 0.06,0.2,0.06, 0.08,1.15,0.42, g);
     } else if(type==='bird'){
-      vox(0x4a7ad0, 0.18,0.16,0.26, 0,0.1,0, g);           // body
-      vox(0x4a7ad0, 0.14,0.14,0.14, 0,0.2,0.12, g);        // head
-      vox(0xe0a040, 0.05,0.05,0.08, 0,0.2,0.22, g);        // beak
-      vox(0x3a5aa0, 0.26,0.04,0.16, 0,0.12,-0.02, g);      // wings
+      const bodyCol = [0x4a7ad0, 0xd05a4a, 0x4aa060, 0xe0a040][Math.random()*4|0];
+      vox(bodyCol, 0.2,0.18,0.3, 0,0.1,0, g);             // body
+      vox(bodyCol, 0.15,0.15,0.15, 0,0.22,0.16, g);       // head
+      vox(0xf0e0d0, 0.12,0.1,0.1, 0,0.06,0.1, g);         // pale belly
+      vox(0xe0a040, 0.05,0.05,0.1, 0,0.22,0.27, g);       // beak
+      vox(0x2a2a2a, 0.04,0.04,0.04, 0.06,0.25,0.2, g);    // eye
+      vox(bodyCol, 0.1,0.05,0.26, 0,0.1,-0.24, g);        // tail
+      // two separate wings (pivoted groups) so they can flap
+      const wingL = new THREE.Group();
+      vox(bodyCol, 0.28,0.05,0.2, -0.14,0,0, wingL);
+      wingL.position.set(-0.1,0.14,0); g.add(wingL);
+      const wingR = new THREE.Group();
+      vox(bodyCol, 0.28,0.05,0.2, 0.14,0,0, wingR);
+      wingR.position.set(0.1,0.14,0); g.add(wingR);
+      g.userData.wingL = wingL;
+      g.userData.wingR = wingR;
     } else if(type==='bee'){
       vox(0xe0c040, 0.14,0.12,0.18, 0,0,0, g);             // body
       vox(0x2a2a2a, 0.15,0.13,0.05, 0,0,0.02, g);          // stripe
@@ -1877,13 +1979,32 @@
     return new THREE.Vector3(Math.cos(a)*r, 0, Math.sin(a)*r);
   }
 
-  // find a ripe veggie/fruit plant (what pests want to eat)
+  // find a crop a pest wants to eat: tomatoes (veg), apples & cherries (ftree).
+  // We include plants that are at least partly grown (stage>=1), not only fully
+  // ripe ones — pests will happily nibble a developing crop, so they show up far
+  // more reliably. Ripe crops are still preferred when available.
   function findEdiblePlant(){
-    const edible = plants.filter(p =>
-      p.ripe && (p.entry.cat==='veg' || p.entry.cat==='fruit' || p.entry.cat==='ftree')
+    const eatable = plants.filter(p =>
+      p.stage>=1 && (p.entry.cat==='veg' || p.entry.cat==='fruit' || p.entry.cat==='ftree')
     );
-    return edible.length ? edible[Math.random()*edible.length|0] : null;
+    if(!eatable.length) return null;
+    const ripe = eatable.filter(p => p.ripe);
+    const pool = ripe.length ? ripe : eatable;     // prefer ripe, else any growing
+    return pool[Math.random()*pool.length|0];
   }
+  // a gentle wander destination within the grove for a roaming bee
+  function beeWanderPoint(near){
+    // a fresh point somewhere over the grove interior (well inside the borders),
+    // biased to actually move away from the current spot so bees never stall.
+    const a = Math.random()*Math.PI*2;
+    const r = 6 + Math.random()*10;
+    return new THREE.Vector3(
+      Math.max(-16, Math.min(16, Math.cos(a)*r)),
+      1.6 + Math.random()*1.4,
+      Math.max(-16, Math.min(16, Math.sin(a)*r))
+    );
+  }
+
   function findPlacedByName(name){
     const list = placed.filter(o => o.entry && o.entry.name===name);
     return list.length ? list[Math.random()*list.length|0] : null;
@@ -1891,6 +2012,17 @@
   function findFlower(){
     const flowers = plants.filter(p => p.entry.cat==='flower' && p.stage>=1);
     return flowers.length ? flowers[Math.random()*flowers.length|0] : null;
+  }
+
+  // pick up to `n` distinct flowers for a bee's foraging route
+  function pickFlowers(n){
+    const all = plants.filter(p => p.entry.cat==='flower' && p.stage>=1);
+    const chosen = [];
+    while(chosen.length < n && all.length){
+      const idx = Math.random()*all.length|0;
+      chosen.push(all.splice(idx,1)[0]);   // remove so we don't pick it twice
+    }
+    return chosen;
   }
 
   function spawnCritter(type, target){
@@ -1902,16 +2034,36 @@
       : edgePoint();
     mesh.position.copy(start);
     scene.add(mesh);
-    critters.push({
+
+    const c = {
       type, mesh, target,
       state:'arrive',
       flying,
       speed: type==='deer' ? 2.2 : type==='squirrel' ? 3.2 : type==='bird' ? 4 : 2.6,
       timer: 0,                 // counts time spent in the 'act' state
-      actDur: type==='bird' ? 5 : (flying ? 9999 : 2.5), // flutter critters linger
+      actDur: type==='bird' ? 5 : (flying ? 9999 : 2.5),
       bob: Math.random()*Math.PI*2,
       home: start.clone(),      // where it leaves toward
-    });
+    };
+
+    // BEES and BUTTERFLIES are permanent grove residents using one shared
+    // behaviour (updateBee): roam freely, get drawn to flowers, never idle.
+    // Bees also deliver pollen to a hive for honey; butterflies just flit about.
+    if(type==='bee' || type==='butterfly'){
+      // start somewhere over the grove interior, not way out at the edge
+      mesh.position.set((Math.random()*2-1)*14, 1.8, (Math.random()*2-1)*14);
+      c.pollen = 0;
+      c.hive = null;
+      c.beeState = 'roam';       // roam | toFlower | atFlower | toHive
+      c.wander = beeWanderPoint(c.mesh.position);
+      c.target = null;
+      c.actDur = 1.6;            // brief pause gathering at a flower
+      c.permanent = true;        // don't despawn at map edge
+      c.speed = type==='bee' ? 3.2 : 2.6;
+      c.makesHoney = (type==='bee');   // butterflies don't visit hives
+    }
+
+    critters.push(c);
   }
 
   // move a critter toward a 3D point; returns true when close enough
@@ -1932,37 +2084,39 @@
     return false;
   }
 
-  // chance-based spawning, checked a few times per second (not every frame)
+  // chance-based spawning, checked a few times per second (not every frame).
+  // This is fully PERSISTENT: every cycle it re-checks what's in the garden, so
+  // as long as something attracts them, critters keep visiting from time to time.
   let spawnClock = 0;
   function maybeSpawn(dt, isDay){
     spawnClock += dt;
-    if(spawnClock < 1.2) return;     // evaluate ~ once per 1.2s
+    if(spawnClock < 1.0) return;     // evaluate ~ once per second
     spawnClock = 0;
     if(!isDay) return;               // wildlife is active in daytime only
+    if(critters.length >= CRITTER_CAP) return;
 
-    // PESTS: squirrels/deer come for ripe edible crops
-    if(Math.random() < 0.18){
+    // PESTS: squirrels/deer come for tomatoes, apples & cherries (growing or ripe)
+    if(Math.random() < 0.32){
       const target = findEdiblePlant();
-      if(target){
-        spawnCritter(Math.random()<0.6 ? 'squirrel' : 'deer', target);
-      }
+      if(target) spawnCritter(Math.random()<0.55 ? 'squirrel' : 'deer', target);
     }
-    // BIRDS: only if a bird bath exists
-    if(Math.random() < 0.25){
+    // BIRDS: visit often whenever a bird bath exists
+    if(Math.random() < 0.45){
       const bath = findPlacedByName('Bird Bath');
       if(bath) spawnCritter('bird', bath);
     }
-    // BEES: drawn to flowers, more likely if a bee hive exists
-    const hive = findPlacedByName('Bee Hive');
-    if(Math.random() < (hive ? 0.5 : 0.22)){
-      const flower = findFlower();
-      const target = flower || hive;
-      if(target) spawnCritter('bee', target);
+    // BEES are permanent residents: keep a small population alive at all times,
+    // independent of flowers or hives (they roam the grove regardless).
+    const beeCount = critters.reduce((n,c)=> n + (c.type==='bee'?1:0), 0);
+    const BEE_TARGET = 4;
+    if(beeCount < BEE_TARGET && Math.random() < 0.5){
+      spawnCritter('bee', null);
     }
-    // BUTTERFLIES: drawn to flowers
-    if(Math.random() < 0.22){
-      const flower = findFlower();
-      if(flower) spawnCritter('butterfly', flower);
+    // BUTTERFLIES: a few flit around when flowers are present (same roam/flower
+    // behaviour as bees, minus the hive). Capped so they don't accumulate.
+    const flyCount = critters.reduce((n,c)=> n + (c.type==='butterfly'?1:0), 0);
+    if(flyCount < 3 && findFlower() && Math.random() < 0.3){
+      spawnCritter('butterfly', null);
     }
   }
 
@@ -1975,23 +2129,120 @@
     return null;   // target gone (harvested / removed)
   }
 
+  // Dedicated bee behaviour: a permanent grove resident that is ALWAYS moving.
+  //   roam     -> drift to a wander point; if a flower exists, switch to toFlower
+  //   toFlower -> fly to the flower
+  //   atFlower -> circle briefly to gather pollen, then head to a hive (if any) or roam
+  //   toHive   -> fly to the hive, deposit pollen -> honey, then roam again
+  // helper: send a bee into roam mode with a fresh destination + brief cooldown
+  function beeRoam(c, cooldown){
+    c.beeState = 'roam';
+    c.target = null;
+    c.wander = beeWanderPoint(c.mesh.position);
+    c.roamCooldown = cooldown || 0;   // seconds before it may chase a flower again
+    c.scan = 0;
+  }
+
+  function updateBee(c, dt, now){
+    c.bob += dt*4;
+    const flap = Math.sin(now*0.02)*0.05;            // subtle vertical flutter
+
+    if(c.beeState==='roam'){
+      // drift toward the wander point; pick a new one when reached
+      if(moveToward(c, c.wander, dt)){
+        c.wander = beeWanderPoint(c.mesh.position);
+      }
+      c.mesh.position.y += flap;
+      // count down the cooldown so a bee actually roams before re-foraging
+      if(c.roamCooldown > 0){ c.roamCooldown -= dt; return; }
+      // get attracted to a flower if one exists (checked occasionally)
+      c.scan = (c.scan||0) + dt;
+      if(c.scan > 0.8){
+        c.scan = 0;
+        const f = findFlower();
+        if(f && Math.random() < 0.5){ c.target = f; c.beeState = 'toFlower'; }
+      }
+      return;
+    }
+
+    if(c.beeState==='toFlower'){
+      const tp = targetPos(c);
+      if(!tp){ beeRoam(c, 1.5); return; }   // flower gone -> roam a while
+      const dest = _destTmp.set(tp.x, 1.3, tp.z);
+      if(moveToward(c, dest, dt)){ c.beeState='atFlower'; c.timer=0; }
+      return;
+    }
+
+    if(c.beeState==='atFlower'){
+      const tp = targetPos(c);
+      if(!tp){ beeRoam(c, 1.5); return; }   // flower harvested mid-visit -> roam
+      c.timer += dt;
+      // gentle circling drift around the flower (never perfectly still)
+      const ang = c.bob*0.8;
+      const r = 0.5 + Math.sin(c.bob*0.6)*0.18;
+      c.mesh.position.x = tp.x + Math.cos(ang)*r;
+      c.mesh.position.z = tp.z + Math.sin(ang)*r;
+      c.mesh.position.y = 1.3 + Math.sin(c.bob)*0.15;
+      if(c.timer >= c.actDur){
+        c.pollen++;
+        const hive = c.makesHoney ? findPlacedByName('Bee Hive') : null;
+        if(hive){ c.hive = hive; c.target = hive; c.beeState='toHive'; }
+        // no hive (or a butterfly): wander off for a couple seconds before
+        // visiting a flower again, so it doesn't appear glued to one flower.
+        else { beeRoam(c, 2.5); }
+      }
+      return;
+    }
+
+    if(c.beeState==='toHive'){
+      const tp = targetPos(c);
+      if(!tp){ beeRoam(c, 1.5); return; }   // hive removed
+      const dest = _destTmp.set(tp.x, 1.4, tp.z);
+      if(moveToward(c, dest, dt)){
+        if(c.pollen > 0){ addToBasket('Honey'); flash('Your bee hive produced Honey! 🍯'); }
+        c.pollen = 0;
+        // head back out to the grove; a short roam first so it doesn't snap
+        // straight back onto the same flower.
+        beeRoam(c, 1.5);
+      }
+      return;
+    }
+
+    // any unknown state -> recover into roam
+    beeRoam(c, 1.0);
+  }
+
   function updateCritters(dt, now){
     for(let i=critters.length-1; i>=0; i--){
       const c = critters[i];
+
+      // bees use their own dedicated behaviour (always moving, roam/forage/hive)
+      // bees & butterflies share one dedicated behaviour (always moving)
+      if(c.type==='bee' || c.type==='butterfly'){ updateBee(c, dt, now); continue; }
+
       const tp = targetPos(c);
 
-      // gentle wing-bob for flyers (bees & butterflies hover; birds land)
+      // gentle wing-bob for flyers (butterflies hover; birds land)
       if(c.flying && c.type!=='bird'){
-        c.bob += dt*12;
-        // hover at a pleasant height, bobbing up and down a little
+        c.bob += dt*8;
         const baseY = (c.state==='act' && tp) ? 1.1 : 1.6;
-        c.mesh.position.y = baseY + Math.sin(c.bob)*0.3;
+        c.mesh.position.y = baseY + Math.sin(c.bob)*0.25;
       } else if(c.type==='bird'){
         c.bob += dt*8;
+        // flap the wings — fast while flying, gentle while perched
+        const wingL = c.mesh.userData.wingL, wingR = c.mesh.userData.wingR;
+        if(wingL && wingR){
+          const flapping = (c.state==='arrive' || c.state==='leave');
+          const amp = flapping ? 0.9 : 0.25;
+          const sp  = flapping ? 16 : 5;
+          const a = Math.sin(now*0.001*sp)*amp;
+          wingL.rotation.z =  a;
+          wingR.rotation.z = -a;
+        }
       }
 
       if(c.state==='arrive'){
-        if(!tp){ c.state='leave'; continue; }   // target vanished, go home
+        if(!tp){ c.state='leave'; continue; }
         const dest = _arriveDest(c, tp);
         if(moveToward(c, dest, dt)){
           c.state='act'; c.timer=0;
@@ -1999,7 +2250,8 @@
       }
       else if(c.state==='act'){
         c.timer += dt;
-        if(!tp && c.type!=='butterfly' && c.type!=='bee'){ c.state='leave'; continue; }
+
+        if(!tp && c.type!=='butterfly'){ c.state='leave'; continue; }
         // PEST eats the plant on arrival
         if((c.type==='squirrel'||c.type==='deer') && c.target && c.target.kind==='plant'){
           eatPlant(c.target);
@@ -2007,14 +2259,11 @@
           c.state='leave';
           continue;
         }
-        // flutter/bathe in place for a while
-        if(tp){
-          if(c.type==='bee' || c.type==='butterfly'){
-            // circle the flower
-            const ang = c.bob;
-            c.mesh.position.x = tp.x + Math.cos(ang)*0.7;
-            c.mesh.position.z = tp.z + Math.sin(ang)*0.7;
-          }
+        // butterflies flutter around the flower
+        if(tp && c.type==='butterfly'){
+          const ang = c.bob;
+          c.mesh.position.x = tp.x + Math.cos(ang)*0.7;
+          c.mesh.position.z = tp.z + Math.sin(ang)*0.7;
         }
         if(c.timer >= c.actDur){ c.state='leave'; }
         // flyers without a target also eventually leave
@@ -2195,6 +2444,26 @@
     scene.fog.near += (tgt.fogNear - scene.fog.near) * dt * 1.5;
     scene.fog.far  += (tgt.fogFar  - scene.fog.far ) * dt * 1.5;
 
+    // --- Stone Lantern illumination: glows from dusk to dawn ---
+    // nightFactor is ~0 in daylight and ~1 at full night. We ramp the lantern on
+    // once it starts getting dark, so the bulb glows and casts a warm pool of light.
+    const lanternGlow = Math.max(0, (nightFactor - 0.35)) / 0.65;  // 0 by day, 1 deep night
+    for(const o of placed){
+      // the lantern parts live on the model mesh (a child of o.group)
+      const ud = (o.mesh && o.mesh.userData && o.mesh.userData.lanternBulb) ? o.mesh.userData
+               : (o.group && o.group.userData && o.group.userData.lanternBulb) ? o.group.userData
+               : null;
+      if(ud){
+        ud.lanternBulb.material.emissiveIntensity = lanternGlow * 1.54;
+        ud.lanternLight.intensity = lanternGlow * 2.1;
+        if(ud.lanternHalo){
+          ud.lanternHalo.material.opacity = lanternGlow * 0.63;
+          const flick = 1 + Math.sin(now*0.012)*0.06;
+          ud.lanternHalo.scale.set(2.2*flick, 2.2*flick, 1);
+        }
+      }
+    }
+
     if(rain.visible){
       const p=rainGeo.attributes.position;
       for(let i=0;i<RAIN_N;i++){
@@ -2257,7 +2526,15 @@
       if(hoverTimer<=0){ hoverSprite.visible=false; hoverPlant=null; }
     }
 
-    // --- floating prompt follows player on screen ---
+    // cancel a pending remove-confirmation if the player walks off that tile
+    if(pendingRemove){
+      const pc = Math.floor((player.position.x + PLOT/2)/TILE);
+      const pr = Math.floor((player.position.z + PLOT/2)/TILE);
+      if((pc+','+pr) !== pendingRemoveKey){
+        pendingRemove = null; pendingRemoveKey = null; clearPrompt();
+      }
+    }
+
     // --- wildlife ---
     maybeSpawn(dt, sunFactor > 0.15);   // active during daytime
     updateCritters(dt, now);
@@ -2282,6 +2559,8 @@
   generateAllBuildingIcons();  // building icons for the trade panel
   renderLibrary();
   refreshBasket();
+  // a few bees already live in the grove from the start
+  for(let i=0;i<3;i++) spawnCritter('bee', null);
   tick();
   setTimeout(()=>{const v=document.getElementById('veil');v.style.opacity=0;setTimeout(()=>v.remove(),800);},600);
   </script>
