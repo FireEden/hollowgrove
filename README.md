@@ -88,7 +88,6 @@ Hollowgrove is currently under active development.
 
 Planned additions include:
 
-* 🐝 Wildlife and insects
 * 🏠 More buildings and decorations
 * 🌼 Additional flowers and crops
 * 🎵 Ambient music and sound effects
