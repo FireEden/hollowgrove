@@ -92,7 +92,7 @@
         <span id="invClose" style="color:var(--gold);cursor:pointer;font-size:12px;opacity:.7;">▾</span>
       </div>
       <div class="title-rule"></div>
-      <div id="invList" style="display:flex;flex-direction:column;gap:5px;max-height:260px;overflow:auto;"></div>
+      <div id="invList" class="gold-scroll" style="display:flex;flex-direction:column;gap:5px;max-height:260px;overflow:auto;"></div>
     </div>
 
     <!-- Harvest basket -->
@@ -823,8 +823,9 @@
       const txt=document.createElement('div'); txt.style.flex='1';
       const from=c.start==='cutting'?'cutting':'seed';
       const footTxt = c.foot>1 ? ' · '+c.foot+'×'+c.foot : '';
+      const catLabel = (c.cat==='ftree' ? 'TREE' : c.cat.toUpperCase());
       txt.innerHTML='<div style="color:var(--gold-soft);font-size:13px;">'+c.name+'</div>'+
-        '<div style="color:var(--gold);opacity:.55;font-size:10px;letter-spacing:1px;">'+c.cat.toUpperCase()+' · '+from+footTxt+'</div>';
+        '<div style="color:var(--gold);opacity:.55;font-size:10px;letter-spacing:1px;">'+catLabel+' · '+from+footTxt+'</div>';
       row.appendChild(txt);
 
       // right-side status
@@ -1426,10 +1427,10 @@
     riverPoints.push({ x:cx, z:cz });
   }
   (function carveRiver(){
-    // Flow west->east across the south, a little closer to the plot now but still
-    // leaving an open land gap to farm in (plot ends at z≈8; river ~z10..18).
-    for(let x = -26; x <= 26; x += TILE*0.6){
-      const z = 15 + 4*Math.sin((x+26)/20);        // gentle curve around z≈11..19
+    // Flow all the way across the grove, from the west edge to the east edge.
+    // (ground is ±32; we run slightly past so the water meets both boundaries.)
+    for(let x = -33; x <= 33; x += TILE*0.6){
+      const z = 15 + 4*Math.sin((x+33)/20);        // gentle curve through the south
       const {col,row} = colRowAt(x, z);
       addRiverTile(col, row);
       addRiverTile(col, row+1);
@@ -1969,9 +1970,9 @@
     { name:'Apple Tree',   needs:{Tomato:4, Carrot:2, Marigold:1},  rewardKind:'seed',     rewardIdx:7,  hint:'a small fruit tree' },
     { name:'Cherry Tree',  needs:{Apple:3, Honey:2},                rewardKind:'seed',     rewardIdx:8,  hint:'pink blossoms, loves honey' },
     { name:'Oak Sapling',  needs:{Carrot:4, Tomato:3, Basil:2},     rewardKind:'seed',     rewardIdx:9,  hint:'a slow, sturdy oak' },
-    { name:'Garden Bench', needs:{Tomato:3},                        rewardKind:'building', rewardIdx:6,  hint:'a weathered wooden bench' },
-    { name:'Pagoda',       needs:{Apple:5, Tomato:5, Carrot:3},     rewardKind:'building', rewardIdx:7,  hint:'a tall tiered pavilion' },
-    { name:'Koi Pond',     needs:{Apple:5, Cherry:3, Honey:4},      rewardKind:'building', rewardIdx:8,  hint:'a sunken pool with koi' },
+    { name:'Garden Bench', needs:{Tomato:3},                        rewardKind:'building', rewardIdx:7,  hint:'a weathered wooden bench' },
+    { name:'Pagoda',       needs:{Apple:5, Tomato:5, Carrot:3},     rewardKind:'building', rewardIdx:8,  hint:'a tall tiered pavilion' },
+    { name:'Koi Pond',     needs:{Apple:5, Cherry:3, Honey:4},      rewardKind:'building', rewardIdx:9,  hint:'a sunken pool with koi' },
   ];
 
   function canAffordTrade(t){
@@ -2215,12 +2216,30 @@
       vox(0xa57848, 0.42,0.46,0.8, 0,0.6,0, g);            // body
       vox(0x8a6038, 0.22,0.5,0.22, 0,0.3,0, g);            // (filler) neck base
       vox(0xa57848, 0.26,0.3,0.3, 0,0.95,0.4, g);          // head
+      vox(0x2a1a0e, 0.05,0.05,0.05, 0.08,1.0,0.54, g);     // eye R
+      vox(0x2a1a0e, 0.05,0.05,0.05, -0.08,1.0,0.54, g);    // eye L
       vox(0x6a4a2a, 0.1,0.5,0.1, -0.14,0.28,0.32, g);      // legs
       vox(0x6a4a2a, 0.1,0.5,0.1, 0.14,0.28,0.32, g);
       vox(0x6a4a2a, 0.1,0.5,0.1, -0.14,0.28,-0.32, g);
       vox(0x6a4a2a, 0.1,0.5,0.1, 0.14,0.28,-0.32, g);
-      vox(0xe0d0b0, 0.06,0.2,0.06, -0.08,1.15,0.42, g);    // antlers
-      vox(0xe0d0b0, 0.06,0.2,0.06, 0.08,1.15,0.42, g);
+      // ---- branched antlers (one rack per side) ----
+      const ANT = 0xcdb98c;
+      [-1, 1].forEach(s => {
+        // main beam: angles up and back from the brow
+        const beam = vox(ANT, 0.06,0.42,0.06, s*0.11, 1.28, 0.34, g);
+        beam.rotation.z = s*0.35; beam.rotation.x = -0.3;
+        // base pedicle
+        vox(ANT, 0.07,0.12,0.07, s*0.1, 1.12, 0.36, g);
+        // forward brow tine
+        const t1 = vox(ANT, 0.05,0.2,0.05, s*0.16, 1.34, 0.46, g);
+        t1.rotation.x = -0.9;
+        // mid tine pointing up-out
+        const t2 = vox(ANT, 0.05,0.22,0.05, s*0.27, 1.46, 0.28, g);
+        t2.rotation.z = s*0.7;
+        // top fork tine
+        const t3 = vox(ANT, 0.05,0.2,0.05, s*0.2, 1.62, 0.2, g);
+        t3.rotation.z = s*0.3; t3.rotation.x = -0.2;
+      });
     } else if(type==='bird'){
       const bodyCol = [0x4a7ad0, 0xd05a4a, 0x4aa060, 0xe0a040][Math.random()*4|0];
       vox(bodyCol, 0.2,0.18,0.3, 0,0.1,0, g);             // body
