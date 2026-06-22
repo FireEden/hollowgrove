@@ -37,10 +37,7 @@ Built entirely with **HTML**, **JavaScript**, and **Three.js**, Hollowgrove runs
 | **W A S D** | Move                   |
 | **Q / E**   | Rotate camera          |
 | **R**       | Rotate selected object |
-| **B**       | Dig soil               |
-| **T**       | Open Trade Menu        |
-| **Esc**     | Close menus            |
-| **1**       | Cycle weather (debug)  |
+| **Space**       | Action               |
 
 ---
 
